@@ -6,11 +6,15 @@ of any individual transformation.
 
 Pipeline:
     raw dataframe
-        -> feature construction on full continuous series
+        -> feature construction on full continuous series (including
+           baseline-specific seasonal context lags, e.g. lag_143/lag_138)
         -> chronological split masks
         -> train-only scaler fitting
         -> transform train/val/test with the same scaler
-        -> horizon-specific dataset assembly
+        -> horizon-specific dataset assembly (features + raw context
+           columns needed by non-learned baselines: Appliances[t] for
+           the naive persistence baseline, and Appliances[t+h-144] for
+           the naive seasonal baseline, per horizon)
 """
 
 from dataclasses import dataclass
@@ -24,6 +28,7 @@ from config.features import (
     SPLIT_TRAIN_END,
     SPLIT_VAL_END,
     TARGET_HORIZONS,
+    BASELINE_CONTEXT_LAGS,
 )
 from src.data.assemble import build_horizon_dataset
 from src.data.split import create_time_masks
@@ -46,6 +51,24 @@ class PipelineResult:
     test_t6: pd.DataFrame
 
 
+def _context_columns_for_horizon(horizon: int) -> list[str]:
+    """
+    Raw/baseline-only context columns required for a given forecast
+    horizon, on top of the canonical FEATURE_COLUMNS:
+
+    - "Appliances": Appliances[t], needed by the naive persistence
+      baseline (predict = last observed value, held flat).
+    - "Appliances_lag_{N}", where N = BASELINE_CONTEXT_LAGS[horizon]:
+      Appliances[t+horizon-144], needed by the naive seasonal baseline
+      (predict = same time yesterday's cycle position).
+
+    Not part of FEATURE_COLUMNS or SCALED_COLUMNS — these are baseline
+    context only, per the Forecaster.required_columns design.
+    """
+    seasonal_lag = BASELINE_CONTEXT_LAGS[horizon]
+    return ["Appliances", f"Appliances_lag_{seasonal_lag}"]
+
+
 def run_pipeline(df_raw: pd.DataFrame) -> PipelineResult:
     """
     Run the complete Phase 2 feature engineering and preprocessing pipeline.
@@ -58,10 +81,16 @@ def run_pipeline(df_raw: pd.DataFrame) -> PipelineResult:
     for train, validation, and test transformations.
 
     Final modeling datasets are assembled independently for each horizon
-    and partition.
+    and partition, and each carries the raw context columns required by
+    the naive baselines (see _context_columns_for_horizon) alongside the
+    engineered FEATURE_COLUMNS — without adding raw/baseline-only values
+    to the learned-model feature contract itself.
     """
 
-    # 1. Feature engineering on the full continuous series.
+    # 1. Feature engineering on the full continuous series. This includes
+    #    baseline-specific seasonal context lags (e.g. lag_143, lag_138),
+    #    added inside build_features via the same leakage-safe mechanism
+    #    used for the canonical LAG_STEPS.
     df_features = build_features(
         df_raw,
         target_horizons=TARGET_HORIZONS,
@@ -101,40 +130,46 @@ def run_pipeline(df_raw: pd.DataFrame) -> PipelineResult:
     )
 
     # 5. Assemble horizon-specific modeling datasets.
+    #    context_columns carries Appliances (persistence baseline) and
+    #    the horizon-specific seasonal lag (seasonal-naive baseline)
+    #    through unscaled — StandardScaler was only ever fit on
+    #    SCALED_COLUMNS, which excludes all context columns.
     train_t1 = build_horizon_dataset(
         df_train_scaled,
         FEATURE_COLUMNS,
         "target_t1",
+        context_columns=_context_columns_for_horizon(1),
     )
-
     val_t1 = build_horizon_dataset(
         df_val_scaled,
         FEATURE_COLUMNS,
         "target_t1",
+        context_columns=_context_columns_for_horizon(1),
     )
-
     test_t1 = build_horizon_dataset(
         df_test_scaled,
         FEATURE_COLUMNS,
         "target_t1",
+        context_columns=_context_columns_for_horizon(1),
     )
 
     train_t6 = build_horizon_dataset(
         df_train_scaled,
         FEATURE_COLUMNS,
         "target_t6",
+        context_columns=_context_columns_for_horizon(6),
     )
-
     val_t6 = build_horizon_dataset(
         df_val_scaled,
         FEATURE_COLUMNS,
         "target_t6",
+        context_columns=_context_columns_for_horizon(6),
     )
-
     test_t6 = build_horizon_dataset(
         df_test_scaled,
         FEATURE_COLUMNS,
         "target_t6",
+        context_columns=_context_columns_for_horizon(6),
     )
 
     return PipelineResult(

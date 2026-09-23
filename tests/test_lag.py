@@ -1,3 +1,5 @@
+"""Tests for src.features.lag.add_lag_features (leakage-safety and shift correctness)."""
+
 import pandas as pd
 import pytest
 

@@ -1,3 +1,5 @@
+"""Tests for src.data.split.create_time_masks."""
+
 import pandas as pd
 import pytest
 

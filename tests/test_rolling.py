@@ -1,3 +1,5 @@
+"""Tests for src.features.rolling.add_rolling_features (backward-only window correctness)."""
+
 import pandas as pd
 import pytest
 

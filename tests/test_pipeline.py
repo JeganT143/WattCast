@@ -1,3 +1,5 @@
+"""End-to-end tests for src.pipeline.run_pipeline."""
+
 import numpy as np
 import pandas as pd
 
@@ -29,15 +31,12 @@ def test_run_pipeline_returns_complete_result():
     result = run_pipeline(df)
 
     assert isinstance(result, PipelineResult)
-
     assert result.train_t1 is not None
     assert result.val_t1 is not None
     assert result.test_t1 is not None
-
     assert result.train_t6 is not None
     assert result.val_t6 is not None
     assert result.test_t6 is not None
-
     assert result.scaler is not None
 
 
@@ -46,8 +45,9 @@ def test_run_pipeline_outputs_have_expected_columns():
 
     result = run_pipeline(df)
 
-    expected_features = {
+    canonical_features = {
         "date",
+        "Appliances",
         "Appliances_lag_1",
         "Appliances_lag_2",
         "Appliances_lag_3",
@@ -68,19 +68,29 @@ def test_run_pipeline_outputs_have_expected_columns():
         "day_of_week_cos",
     }
 
+    expected_t1 = canonical_features | {
+        "Appliances_lag_143",
+        "target_t1",
+    }
+
+    expected_t6 = canonical_features | {
+        "Appliances_lag_138",
+        "target_t6",
+    }
+
     for dataset in [
         result.train_t1,
         result.val_t1,
         result.test_t1,
     ]:
-        assert set(dataset.columns) == expected_features | {"target_t1"}
+        assert set(dataset.columns) == expected_t1
 
     for dataset in [
         result.train_t6,
         result.val_t6,
         result.test_t6,
     ]:
-        assert set(dataset.columns) == expected_features | {"target_t6"}
+        assert set(dataset.columns) == expected_t6
 
 
 def test_run_pipeline_outputs_contain_no_nans():
@@ -142,5 +152,30 @@ def test_run_pipeline_fits_scaler():
 
     assert hasattr(result.scaler, "mean_")
     assert hasattr(result.scaler, "scale_")
-
     assert result.scaler.n_features_in_ == 11
+
+
+def test_run_pipeline_appliances_context_column_is_unscaled():
+    df = make_synthetic_raw_data()
+
+    result = run_pipeline(df)
+
+    # Appliances is a context column, not in SCALED_COLUMNS — its values
+    # in the assembled dataset must match the raw input, not be
+    # standardized. This proves fit_scaler/transform_with_scaler never
+    # touched it, even though it rides alongside scaled feature columns
+    # in the same assembled dataframe.
+    raw_appliances_by_date = df.set_index("date")["Appliances"]
+
+    for dataset in [
+        result.train_t1,
+        result.val_t1,
+        result.test_t1,
+    ]:
+        expected = dataset["date"].map(raw_appliances_by_date)
+
+        pd.testing.assert_series_equal(
+            dataset["Appliances"].reset_index(drop=True),
+            expected.reset_index(drop=True),
+            check_names=False,
+        )

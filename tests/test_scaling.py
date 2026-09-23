@@ -1,3 +1,5 @@
+"""Tests for src.preprocessing.scaling: train-only fit_scaler and transform_with_scaler."""
+
 import numpy as np
 import pandas as pd
 import pytest
