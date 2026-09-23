@@ -1,3 +1,5 @@
 dvc
 mlflow
 scikit-learn
+statsmodels
+pytest
