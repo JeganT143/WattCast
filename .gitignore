@@ -1,5 +1,7 @@
 env/
 db/
+mlartifacts/
+mlflow.db
 __pycache__/
 *.pyc
 *.pyo   
