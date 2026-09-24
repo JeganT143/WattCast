@@ -219,3 +219,86 @@ Gap in test coverage that let this slip through initially: the native-model logg
 - Walk-forward validation (currently single-window only) — a thin wrapper around `evaluate_forecaster()`, not yet built.
 - Random Forest hyperparameter tuning (capped depth) — a concrete, evidence-motivated candidate for improvement, not yet attempted.
 - Single-step vs. multi-step forecasting error accumulation comparison — not yet relevant until a model that feeds its own predictions forward exists.
+
+## Phase 4: LSTM evaluation protocol (pre-registration), 2026-09-24
+
+Registered BEFORE any LSTM test, implementation, or experiment exists. Repo HEAD at registration: 318c091.
+Baseline reference: tests/fixtures/golden_baselines.json (last changed in c4c9583; purged data).
+
+### Provenance of these decisions
+- The residual diagnostic (h=6) printed test-split residuals as well as validation ones. Only validation statistics
+  informed these decisions; test residuals were not used to choose anything below.
+- Validation findings used (h=6): LR mean residual -4.00 but median -11.65 (squared-error fit sits above the median of
+  a right-skewed target); persistence is bimodal (median |resid| 20, p90 170); only 45% of LR residuals are within 20 Wh.
+- At h=1, LR is worse than persistence on MAE (+0.91 val, +0.66 test) and better on RMSE (-6.56, -6.43): the earlier
+  claim "no learned model beats persistence at h=1" holds on MAE only.
+
+### Primary question
+- Primary horizon: h=6. Reference baseline: linear_regression at h=6 (lowest baseline test MAE and RMSE).
+- h=1 is reported, not decision-making. It uses the selected hyperparameters below (no separate selection); its
+  output bias uses the median of its own eligible target_t1 values. Seeds 42, 43, 44; one test evaluation per seed.
+
+### Tier 1: success criterion (decision-making)
+- Reference values are read UNROUNDED from the fixture in code: ref_mae and ref_rmse are the test_mae and test_rmse of
+  "linear_regression|h6" (approx 42.3913 and 80.619).
+- Reference separation: the Tier 1 thresholds use the TEST metrics of linear_regression|h6 (ref_mae, ref_rmse). The validation metrics of linear_regression|h6 are used only for hyperparameter selection (below). The two references are never mixed.
+- All three seeds (42, 43, 44) must INDEPENDENTLY satisfy BOTH thresholds on the test partition:
+  test_mae <= 0.99 * ref_mae and test_rmse <= 0.99 * ref_rmse (approx 41.967 and 79.813, informational only).
+- Mean performance never rescues a failing seed. If any seed misses either threshold, the outcome is "not shown"; that
+  is a valid, reportable result, not something to explain away or re-tune.
+
+### Tier 2: reporting (not decision-making)
+- Report each seed's test MAE and RMSE at h=6 and h=1, plus mean +/- sample standard deviation (ddof=1) across the
+  three seeds, next to all Phase 3 baselines (naive_persistence, naive_seasonal, linear_regression, random_forest)
+  from the fixture, at both horizons.
+- No additional success criteria may be introduced after results are seen.
+
+### Model, fixed (not tuned)
+L=18 (required_history_length 17); LSTM hidden_size 64, num_layers 1, dropout 0; Linear(64, 1) head; Adam, learning
+rate 1e-3, no weight decay, no LR schedule, no gradient clipping; batch_size 64; training windows shuffled each epoch
+with a generator seeded from `seed`; float32 internally; target in raw Wh (no target scaling); loss computed in raw Wh.
+Final output-layer bias initialised to the median of the y array passed to fit (eligible training targets), recorded
+as a parameter (output_bias_init="train_target_median"). No early stopping; training runs exactly max_epochs epochs.
+The seed controls weight initialisation and shuffle order. torch_num_threads = 4, fixed for every run.
+Feature columns: FEATURE_COLUMNS minus hour_of_day and day_of_week (16 columns).
+
+### Selection protocol (validation only)
+- Grid: max_epochs in [10, 20, 35, 50] x huber_delta in [20, 40, 60] Wh (12 configurations), each fitted with seeds
+  42, 43, 44 (36 fits), loss = Huber.
+- Reference validation values, read UNROUNDED from the fixture entry "linear_regression|h6": lr_val_mae, lr_val_rmse
+  (approx 44.416 and 81.931).
+- Reference separation: hyperparameter selection uses the VALIDATION metrics of linear_regression|h6 (lr_val_mae, lr_val_rmse). The test metrics of linear_regression|h6 are used only for the Tier 1 thresholds (above). The two references are never mixed.
+- For each configuration, mean_val_mae and mean_val_rmse are the arithmetic means of the per-seed validation metrics
+  over seeds 42, 43, 44. Then:
+    val_mae_ratio  = mean_val_mae  / lr_val_mae
+    val_rmse_ratio = mean_val_rmse / lr_val_rmse
+    selection_score = max(val_mae_ratio, val_rmse_ratio)
+- Selected configuration = minimum of the key
+  (selection_score, val_mae_ratio, val_rmse_ratio, max_epochs, huber_delta), compared lexicographically:
+  lowest score; if exactly tied, lowest val_mae_ratio; then lowest val_rmse_ratio; then lower max_epochs;
+  then lower huber_delta. No tolerance band.
+- Test isolation: evaluate_forecaster computes test metrics as a side effect of every call. The tuning code must never
+  read, persist, log, or use any test metric or test prediction, and must not call mlflow_logger. Only val_* fields
+  are read; tuning output contains validation metrics only.
+- The LSTM is scored on the full validation population (n_evaluated val = n_val), same as the baselines.
+
+### Final evaluation
+- The selected configuration is refitted with seeds 42, 43, 44 and evaluated on test exactly once per seed at h=6
+  (and once per seed at h=1 with the same hyperparameters). Each pre-registered configuration receives one test
+  evaluation. A run that crashes before producing any metric may be re-run once; log it. Nothing else may be re-run.
+- The test evaluation is performed regardless of the selected configuration's validation score.
+- The two-tier golden bar and the baselines are unchanged by this protocol.
+
+### params (recorded for every run)
+L, hidden_size, num_layers, dropout, learning_rate, batch_size, max_epochs, loss, huber_delta, output_bias_init,
+seed, torch_num_threads, optimizer.
+
+### Changing this protocol
+Any change (grid, rule, seeds, thresholds, architecture, thread count) is a NEW dated and committed registration
+that states how many test evaluations have already occurred.
+
+### Known limits
+Validation is the middle amplitude regime (STL finding), so tuned settings may not transfer to test. The last h
+validation labels point into the test period (at most 6 of 1,728 rows; never trained on). The Random Forest baseline
+moved up to 0.94% on val from 6 fewer training rows: gaps of that size are not evidence. Phase 3 MLflow runs used
+the unpurged data and are slightly stale against the fixture.
