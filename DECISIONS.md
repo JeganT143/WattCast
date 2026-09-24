@@ -512,3 +512,78 @@ I choose to add one note cell at the top pointing to the SHA map in DECISIONS.md
 - What the earlier rewrite attempt (63bc07c through dac85c2 in the reflog) did beyond what the reflog shows, and whether any of it reached the remote.
 - Whether the pre-rewrite commits were ever on the remote (the student's account is that they were; not verified here).
 - Old-to-new hashes for the 3 later re-picked commits (not mapped, see above).
+
+## Phase 5: walk-forward comparison rule (pre-registration), 2026-09-24
+
+### Status
+Registered before any walk-forward fold result exists: no fold has been built, trained or scored, and no Phase 5 model (GRU, CNN-LSTM) exists. Append-only. Any change to this rule after a fold result exists needs a new dated entry that states which results already existed. The same applies if implementation reveals a concrete contradiction with this rule. Phase 5 does not use the test partition; the number of test evaluations stays at six (LSTM, 3 seeds x 2 horizons, registered in the Phase 4 entries).
+
+### Authorship
+The section labelled (student) was written by the student in chat and is transcribed verbatim. All other sections were drafted by an AI mentor (Claude) and accepted by the student ("Accept the Phase 5 proposal"). The prompt that produced this entry was executed by Claude Code.
+
+### Student reasoning (student)
+- **Expanding window:** I choose expanding rather than sliding because the intended production scenario is periodic retraining using all historical data available at that point. Discarding older observations would introduce another modeling assumption that we have not established is beneficial. The observed declining daily amplitude makes distributional change relevant, but it is not enough evidence by itself to justify throwing away older training data; drift monitoring in a later phase is the appropriate place to address that question.
+
+- **0.99 margin:** I choose the 0.99 margin because the Phase 4 protocol already defined a 1% practical improvement threshold relative to the reference model, so reusing it keeps the standards consistent rather than choosing a new threshold after seeing walk-forward behavior. It should not be presented as being derived solely from the random-forest resampling noise; that noise is supporting context, not the statistical basis of the threshold. Requiring the condition for every seed and for both MAE and RMSE also prevents one favorable aggregate metric from being enough to declare superiority.
+
+- **Fold comparison:** I accept using both linear regression and random forest as fixed references rather than selecting a "best classical" model after seeing fold results. I also accept the unweighted mean of fold ratios as the primary aggregation because all evaluation folds have the same 7-day length.
+
+- **Neural models:** I accept keeping the registered LSTM configuration fixed and using the same pre-registered training configuration for GRU and CNN-LSTM rather than introducing per-fold tuning. Any advantage or disadvantage from that choice will be reported rather than hidden.
+
+- **Overlap:** I accept explicitly flagging folds 7-8 because they overlap the historical validation period that informed the LSTM configuration, and reporting the folds 1-6 sensitivity separately. This does not make those folds "fresh" evidence.
+
+- **Interface:** I accept the proposed `make_folds` / runner / pure aggregator separation and the shared `SequenceForecaster` design, provided the existing `Forecaster` contract remains unchanged.
+
+- **Constraint:** once the comparison rule is registered, stop redesigning the methodology unless implementation reveals a concrete contradiction or failure. Phase 5 is to be implemented and evaluated, not endlessly optimized on paper.
+
+### Fold scheme
+- Expanding window, evaluation horizon h=6 only (the registered primary), 8 folds.
+- Evaluation fold k (k = 1..8) covers [2016-03-01 00:00 + 7(k-1) days, +7 days). Fold 1 starts 2016-03-01 00:00; fold 8 ends (exclusive) 2016-04-26 00:00. Each evaluation fold has 1,008 rows (10-minute spacing); make_folds asserts equal row counts.
+- Fold k trains on every row strictly before its evaluation start, beginning at the first row of the series (2016-01-11 17:00). Estimates, to be recorded exactly by make_folds: about 7,100 rows for fold 1 and about 14,150 rows (about 98 days) for fold 8.
+- Unused: 2016-04-26 to 2016-04-30 (4 days). No evaluation window reaches 2016-04-30, the start of the test partition, and no training row is from the test partition.
+
+### Purge and scaling
+- Per fold, labels of the last 6 train rows (they point into the evaluation window) are masked with the existing mask_ineligible_labels and harness rules; the rules are not re-derived.
+- The processed CSVs are scaled with a scaler fit on all of train (before 2016-04-18). For folds 1-6 that scaler has seen the fold's own evaluation days, the same failure as the deliberate full-data scaler leak. Walk-forward therefore refits a train-only StandardScaler per fold from unscaled features, with the same 11 SCALED_COLUMNS. The scaling step is split out of run_pipeline with an equivalence test proving the existing global train/validation/test outputs are unchanged.
+- Consequence: walk-forward numbers are not comparable to the Phase 3 or Phase 4 test numbers (different windows and scaling).
+
+### Models and fixed configurations
+- Seven models: naive persistence, naive seasonal, linear_regression, random_forest, LSTM, GRU, CNN-LSTM. The non-neural models are fit once per fold with the configuration of the existing wrappers; no seed loop.
+- Neural models use seeds 42, 43 and 44, every fold, no per-fold tuning.
+- LSTM: the registered configuration (max_epochs 50, huber_delta 40, hidden 64, 1 layer, dropout 0, Adam 1e-3, batch 64, window L=18, 16 input columns, 4 threads).
+- GRU: identical settings, with the recurrent layer swapped for a GRU.
+- CNN-LSTM: identical training settings; one Conv1d (32 channels, kernel 3) feeding an LSTM with hidden 64. Remaining architectural details (padding, activation) are fixed in the CNN-LSTM implementation commit, which must precede the first fold run, and do not change after any fold result exists.
+- Only the LSTM had a validation grid; GRU and CNN-LSTM are untuned. Any resulting one-sided advantage is disclosed.
+
+### Comparison rule (decision-making)
+- Metrics: MAE and RMSE, computed per fold on identical evaluation rows for every model. A model that scores a smaller population raises (existing harness rule).
+- References: linear_regression and random_forest, each per fold. No "best classical" is chosen afterwards.
+- Per fold and seed: MAE ratio = model MAE / reference MAE; RMSE ratio likewise.
+- Per seed: the unweighted mean of the 8 per-fold ratios, all 8 folds, unrounded.
+- Verdict per (neural model, reference), 6 in total (LSTM, GRU, CNN-LSTM x 2 references):
+  - "shown better": for every one of the 3 seeds, both mean ratios are <= 0.99.
+  - "shown worse": for every one of the 3 seeds, both mean ratios are >= 1.01.
+  - "not shown": anything else. A mixed result (one metric better, one worse) is "not shown". "Not shown" is not evidence of equivalence.
+- All six verdicts are reported together. No multiplicity correction is applied; the verdict is a registered descriptive rule, not a significance test.
+
+### Reported, not decision-making (Tier 2)
+MAPE (threshold 30 Wh), folds won, worst-fold ratio, seed spread (sample standard deviation, ddof=1), the per-fold table, the naive baselines, and the folds 1-6 sensitivity (mean ratios over folds 1-6 only). If the folds 1-6 sensitivity disagrees with the 8-fold verdict, both are reported and the verdict stays as computed over all 8 folds.
+
+### Interface constraints
+- The Forecaster contract is unchanged. make_folds is a pure function returning fold specs. The runner takes model factories (callables returning a fresh Forecaster), never reused instances. The verdict aggregator is pure. Walk-forward wraps evaluate_on_validation and does not duplicate it.
+- GRU and CNN-LSTM share windowing, context, NaN padding, seeding, threading and the training loop with LSTMForecaster through a shared SequenceForecaster base. Before LSTMForecaster is refactored, a small validation-only golden is frozen and the refactor must reproduce it exactly.
+- Results are written once and the writer refuses to overwrite.
+
+### Cost (estimate, not measured)
+3 neural architectures x 3 seeds x 8 folds = 72 fits at about 30-60 s each, roughly 35-70 minutes, run in the background. The first run measures it; the cost does not change the rule.
+
+### Known limits
+- One house and one 138-day stretch. The folds are not fresh data: they are not independent of each other, folds 7 and 8 overlap the validation period that informed the LSTM configuration (fold 7 partly, fold 8 fully), and the LSTM configuration was selected on that period.
+- Later folds have more training data, so ratios need not be stationary across folds. The STL analysis found the daily amplitude declining over the period.
+- 0.99 is a registered practical margin reused from Phase 4, not derived from resampling noise.
+
+### Mentor prediction (AI, unmeasured, not a decision)
+The LSTM is at or below 1 on MAE and at or above 1 on RMSE against linear_regression, as on test. Uncertain. No prediction for GRU or CNN-LSTM.
+
+### Amendments
+None.
