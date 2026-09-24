@@ -373,3 +373,85 @@ structurally validation-only path lets a test demonstrate the rule instead of re
 
 ### Status
 No validation-only module or runner exists. Zero LSTM test evaluations to date.
+
+## Phase 4: final evaluation result (pre-registered protocol), 2026-09-24
+
+Recorded at HEAD 0c685de. Produced by src/evaluation/final_evaluation.py (2cfaa55) under the protocol registered in f31c3aa,
+from the configuration selected in results/tuning_h6_validation.json (c24fa69). Results: results/final_evaluation.json and
+results/final_evaluation_predictions_h6.csv (0c685de). This entry states results and limits; it claims no cause.
+
+### Tier 1 verdict (h=6, primary)
+Verdict as computed by tier1_verdict with the registered <= comparison: NOT SHOWN.
+Reference (linear_regression h=6, test, unrounded): MAE 42.39131825471337, RMSE 80.61873658942119. Thresholds (0.99 x): MAE 41.96740507216624, RMSE 79.81254922352697.
+
+| seed | test MAE | MAE <= threshold | test RMSE | RMSE <= threshold |
+|---|---|---|---|---|
+| 42 | 39.313 | yes | 84.187 | no |
+| 43 | 38.094 | yes | 81.017 | no |
+| 44 | 38.788 | yes | 85.228 | no |
+
+All three seeds must pass both metrics independently; a mean cannot rescue a failing seed. Either verdict is a registered,
+reportable outcome.
+
+### Test evaluations
+Six (3 seeds x 2 horizons), no reruns, no parameter changed after any result. Any further use of the test partition needs a new
+dated registration that states this count.
+
+### Tier 2 (reporting only; mean and sample standard deviation, ddof=1)
+LSTM, h=6 (primary):
+
+| seed | test MAE | test RMSE | test MAPE |
+|---|---|---|---|
+| 42 | 39.313 | 84.187 | 33.017 |
+| 43 | 38.094 | 81.017 | 31.344 |
+| 44 | 38.788 | 85.228 | 31.639 |
+| mean | 38.731 | 83.477 | 32.000 |
+| std (ddof=1) | 0.612 | 2.193 | 0.893 |
+
+LSTM, h=1 (secondary), same layout:
+
+| seed | test MAE | test RMSE | test MAPE |
+|---|---|---|---|
+| 42 | 28.449 | 65.403 | 23.186 |
+| 43 | 28.456 | 65.034 | 23.639 |
+| 44 | 28.700 | 65.883 | 23.754 |
+| mean | 28.535 | 65.440 | 23.526 |
+| std (ddof=1) | 0.143 | 0.426 | 0.300 |
+
+Phase 3 baselines on the test partition (fixture values, fixed order, not ranked):
+
+| model | horizon | test MAE | test RMSE | test MAPE |
+|---|---|---|---|---|
+| naive_persistence | h=1 | 26.496 | 66.142 | 21.656 |
+| naive_persistence | h=6 | 47.600 | 103.625 | 40.429 |
+| naive_seasonal | h=1 | 53.719 | 112.289 | 51.132 |
+| naive_seasonal | h=6 | 53.776 | 112.358 | 51.177 |
+| linear_regression | h=1 | 27.155 | 59.712 | 24.904 |
+| linear_regression | h=6 | 42.391 | 80.619 | 41.704 |
+| random_forest | h=1 | 32.460 | 65.866 | 30.572 |
+| random_forest | h=6 | 45.118 | 83.065 | 45.340 |
+
+### Validation vs test, selected configuration (h=6, ratio to the linear_regression reference of the same split)
+
+| split | LR reference MAE | LR reference RMSE | LSTM seed-mean MAE | LSTM seed-mean RMSE | MAE ratio | RMSE ratio |
+|---|---|---|---|---|---|---|
+| validation | 44.416 | 81.931 | 34.860 | 79.721 | 0.7849 | 0.9730 |
+| test | 42.391 | 80.619 | 38.731 | 83.477 | 0.9137 | 1.0355 |
+
+### Known limits
+- The selected configuration is the best of 12 by seed-mean validation score, so its validation score is optimistically biased.
+- The two-metric selection score was decided by the RMSE ratio in all 12 configurations.
+- On validation, the RMSE seed spread of the selected configuration (std 2.40) was about as large as its margin over the
+linear_regression validation reference (2.21).
+- Validation is the middle amplitude regime and test the lowest (STL finding, Phase 1); the last h validation labels point into
+the test period (never trained on).
+- The validation-only evaluator's bit-for-bit linear-regression test does not detect a Fortran-ordered input array (measured at
+100 and 1,728 rows; cause not investigated).
+- final_evaluation.py was verified by 22 tests and mechanical checks (step order, single fit path, no ranking constructs); its
+full text was not read by the reviewer.
+- Phase 3 MLflow runs used the unpurged data and are slightly stale against the fixture.
+
+### Not concluded
+No cause is claimed for any difference between the validation and test results; a selection effect and a regime difference are
+both consistent with the ratios above, and nothing in this record separates them. This entry registers no follow-up experiment.
+Exploratory analysis of the saved predictions may follow, is labelled exploratory, and cannot change the verdict.
