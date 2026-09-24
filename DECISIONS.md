@@ -455,3 +455,60 @@ full text was not read by the reviewer.
 No cause is claimed for any difference between the validation and test results; a selection effect and a regime difference are
 both consistent with the ratios above, and nothing in this record separates them. This entry registers no follow-up experiment.
 Exploratory analysis of the saved predictions may follow, is labelled exploratory, and cannot change the verdict.
+
+## Repository history rewrite (trailer removal), 2026-09-24
+
+### Status
+Append-only record. It supersedes the earlier handoff note that history would not be rewritten. Earlier entries are not edited: they still cite pre-rewrite hashes, and the map below gives the correspondence.
+
+### Reasoning (student)
+I rewrote the pushed history to remove the unwanted contributor metadata while preserving the repository content and commit structure as closely as possible. I verified that all 23 old-to-new commit pairs have identical trees, that the resulting `master` is clean and synchronized with `origin/master`, and that no `Co-Authored-By` trailer remains on master. I also verified that the cited old SHAs in `DECISIONS.md` and notebook 04 are real Git objects, but none of them is reachable from the rewritten master history. What I cannot establish is whether the hosting service or another machine still has the old SHAs cached. I also cannot establish what happened during the earlier `63bc07c`...`dac85c2` attempt beyond the evidence currently available, and I will not treat author dates as proof of chronological order because they are self-declared metadata.
+
+### Verified facts (mechanical, from git output on 2026-09-24)
+- Authorship of this entry: the sections labelled (student) were written by the student and transcribed verbatim. The verified-facts section, the SHA map and the prompt that produced this entry were drafted by an AI mentor (Claude) and executed by Claude Code.
+- Commit 82eb111 carried an AI-attribution trailer (a Co-Authored-By line) that the tooling added against the standing instruction. It was amended (message only) into cb1adc6, and the 25 commits above it were re-picked. 22 of those 25 are in the map below; the other 3 (notebook 04 report, repository hygiene, lint config) are not cited by any tracked file and are not mapped.
+- Tree identity: all 23 pairs have identical trees. Tip tree of master is 775afbc550cfb58e47a48e7ec32356e0b5b74d78; tip tree of backup-before-claude-removal is 775afbc550cfb58e47a48e7ec32356e0b5b74d78 (equal).
+- No commit message reachable from master matches co-authored-by, generated with, or noreply@anthropic.
+- Order: 46801cd (protocol pre-registration) is an ancestor of 24b2658 (first LSTMForecaster) and of 1415cca (final results), and 24b2658 is an ancestor of 1415cca. The evidence for order is graph order. Author dates preserve the original chronology but are self-declared; all committer dates are 2026-09-24 16:57:14 +0530, the rewrite time.
+- The pre-rewrite commits resolve locally only through branch backup-before-claude-removal (tip 0e4a2bd1b6a52bf93c93037814c3f32eaddf02ca), which still contains the trailer commit. If that branch is deleted and objects are garbage-collected, the old hashes stop resolving and the map below is their only record.
+- Notebook 04 cites 23 distinct old hashes (in stored tables and in code cells) and DECISIONS.md cites 9; all are in the map. README.md cites none. None is reachable from master.
+- sha256 of the one-shot evidence files at the time of this entry (identical at old and new commits because the trees are identical): results/final_evaluation.json ac23864931c8ff728567278158eedddc53466d881bc67fde765bc20e194f5575; results/tuning_h6_validation.json 3b5e8f7eb1e82baf74752ff177aa69ea49c0898b3f5c84d208b4a21787ff4d80.
+
+### Old-to-new SHA map (old = pre-rewrite, unreachable from master; subjects identical, checked)
+| old SHA | new SHA | subject |
+|---|---|---|
+| 82eb111 | cb1adc6 | data: regenerate processed CSVs with baseline seasonal-lag context; add writer and artifact guard |
+| be746eb | dba2162 | test: freeze golden baseline metrics (pre-interface-change) |
+| 7f0ffc6 | 69e0afe | feat(eval): declared history context for sequence forecasters; harness supplies it per partition |
+| d384b53 | 992658e | test: two-tier golden bar; linear regression tolerates BLAS summation order |
+| 6b66838 | ec9bdcb | feat(data): mask_ineligible_labels for labels that point past a partition boundary |
+| f0bb301 | 449d63c | feat(eval): harness excludes label-ineligible train rows; warm-up and ineligible counts recorded |
+| 55c532c | eb22616 | feat(pipeline): mask train labels that point past the train boundary |
+| c4c9583 | 26638da | data: regenerate processed CSVs with purged train labels; regenerate golden fixture |
+| f95f3f5 | b678536 | build: pin torch 2.14.0+cpu via the PyTorch CPU index |
+| 4403f99 | a842d5c | feat(models): make_windows, the single causal windowing function for training and inference |
+| 318c091 | 932ca8b | feat(models): SequenceDataset over causal windows from make_windows |
+| f31c3aa | 46801cd | docs: pre-register the Phase 4 LSTM evaluation protocol before any LSTM code exists |
+| 6655b54 | 24b2658 | feat(models): LSTMForecaster behind the Forecaster contract, per the pre-registered protocol |
+| a7cfb2f | c7d26c8 | feat(tuning): pure validation-only selection rule and reference loader, per the pre-registered protocol |
+| d6351d7 | 9a5bd52 | docs: record Phase 4 pre-run measurements (repeatability, thread-count difference, cost, zero test evaluations) |
+| 2325bd5 | 6ec280c | docs: record the Option 2 decision that the tuning runner is structurally validation-only |
+| ab1d592 | 2c4adaf | feat(evaluation): validation-only evaluation for tuning, equivalent to the three-partition path |
+| d82a40e | 7d45b57 | feat(tuning): validation-only grid runner for the pre-registered protocol |
+| c24fa69 | f273672 | results: pre-registered validation grid at h=6 (36 fits), validation values only |
+| 2cfaa55 | 462985b | feat(evaluation): pre-registered final evaluation (registered seeds and horizons, Tier 1 verdict, refuses to overwrite) |
+| 0c685de | 1415cca | results: pre-registered final evaluation (seeds 42/43/44, h=6 primary, h=1 secondary); Tier 1 verdict as computed by tier1_verdict |
+| 3fee6fa | 540c9df | docs: record the Phase 4 final evaluation result (Tier 1 NOT SHOWN) and its limits |
+| fce1d88 | 709e55d | docs: exploratory predicted-vs-actual plot of the h=6 test predictions (two fixed windows, descriptive only) |
+
+### Citation policy from here on (student)
+From now on, for historical Git evidence I will use SHA + commit subject, and when pushed history has been rewritten I will add a separate dated DECISIONS.md entry documenting the rewrite and the old-to-new SHA map. I prefer this over tree hashes because a tree hash establishes content at a commit but does not identify the historical commit or explain why its identity changed. I prefer it over a SHA-256 of an evidence file because that proves the integrity of that particular file, not the relationship between repository history and the evidence. I also don't want the dated-entry rule by itself to replace commit identification; the entry should explain the rewrite while the SHA map preserves the correspondence. Six months from now, a reader can verify the new SHA and subject directly in the reachable repository history, inspect its tree/content, and read the dated rewrite entry to understand which old SHA it replaced. For old SHAs that are no longer reachable, the map records the historical correspondence without pretending that the old commit remains part of the current history.
+
+### Notebook 04 (student)
+I choose to add one note cell at the top pointing to the SHA map in DECISIONS.md. I would not regenerate the hashes because that would change a historical report's recorded content merely to make rewritten Git identifiers current, and the notebook is a report rather than a pre-registration. I also would not leave it completely unchanged because its source cells contain hardcoded historical SHAs that are now unreachable, which can mislead a reader into treating those identifiers as current master commits. The note should make the distinction explicit: the report's recorded results/content are unchanged, while the cited commit identifiers refer to pre-rewrite history and their old-to-new correspondence is documented in DECISIONS.md. The notebook itself should not be regenerated solely to replace those historical identifiers. Implemented as one markdown cell at the top; no other cell changed. The hardcoded hashes in the source cells remain as they were.
+
+### Not established
+- Whether the hosting service or any other clone still has the old hashes cached or fetchable.
+- What the earlier rewrite attempt (63bc07c through dac85c2 in the reflog) did beyond what the reflog shows, and whether any of it reached the remote.
+- Whether the pre-rewrite commits were ever on the remote (the student's account is that they were; not verified here).
+- Old-to-new hashes for the 3 later re-picked commits (not mapped, see above).
