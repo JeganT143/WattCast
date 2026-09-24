@@ -268,3 +268,112 @@ def test_non_contiguous_context_is_rejected():
     train, val, test = df.iloc[:10], df.iloc[12:18], df.iloc[18:]  # rows 10-11 missing
     with pytest.raises(ValueError, match="not contiguous"):
         _run(_KBack(3), train, val, test)
+
+
+# ---------------------------------------------------------------------
+# Label eligibility: non-finite (purged) train labels vs warm-up rows
+# ---------------------------------------------------------------------
+
+
+class _RecordingKBack(_KBack):
+    def fit(self, X, y):
+        self.fit_X, self.fit_y = X, y
+        return self
+
+
+def _with_ineligible_tail(train, n):
+    train = train.copy()
+    train.loc[train.index[-n:], "target_t1"] = np.nan
+    return train
+
+
+def test_ineligible_train_labels_are_excluded_from_fit_and_train_scoring():
+    train, val, test = _split(10, 6, 5)
+    model = _RecordingKBack(0)
+    result = _run(model, _with_ineligible_tail(train, 2), val, test)
+    assert len(model.fit_X) == 8
+    assert len(model.fit_y) == 8
+    assert np.isfinite(model.fit_y).all()
+    assert result.n_evaluated["train"] == 8
+    assert result.n_ineligible_label_rows == 2
+
+
+def test_warmup_and_ineligible_label_rows_are_counted_separately():
+    train, val, test = _split(10, 6, 5)
+    result = _run(_KBack(3), _with_ineligible_tail(train, 2), val, test)
+    assert result.n_warmup_rows == 3
+    assert result.n_ineligible_label_rows == 2
+    assert result.n_evaluated == {"train": 10 - 3 - 2, "val": 6, "test": 5}
+
+
+def test_train_actuals_and_predictions_stay_aligned_after_both_exclusions():
+    train, val, test = _split(10, 6, 5)
+    result = _run(_KBack(3), _with_ineligible_tail(train, 2), val, test)
+    # rows 0-2: warm-up (no window); rows 8-9: label ineligible; rows 3..7 are scored
+    assert result.actuals["train"].tolist() == [35.0, 45.0, 55.0, 65.0, 75.0]
+    assert result.predictions["train"].tolist() == [0.0, 10.0, 20.0, 30.0, 40.0]
+
+
+@pytest.mark.parametrize("partition", ["val", "test"])
+def test_non_finite_label_in_val_or_test_raises(partition):
+    train, val, test = _split(10, 6, 5)
+    frames = {"val": val.copy(), "test": test.copy()}
+    frames[partition].loc[frames[partition].index[2], "target_t1"] = np.nan
+    with pytest.raises(ValueError, match="non-finite"):
+        _run(_KBack(0), train, frames["val"], frames["test"])
+
+
+def test_non_trailing_ineligible_train_labels_raise():
+    train, val, test = _split(10, 6, 5)
+    train = train.copy()
+    train.loc[train.index[4], "target_t1"] = np.nan
+    with pytest.raises(ValueError, match="trailing"):
+        _run(_KBack(0), train, val, test)
+
+
+def test_overlapping_warmup_and_ineligible_rows_raise():
+    train, val, test = _split(4, 6, 5)
+    with pytest.raises(ValueError, match="overlap"):
+        _run(_KBack(3), _with_ineligible_tail(train, 2), val, test)
+
+
+def test_counts_are_zero_when_nothing_is_excluded():
+    train, val, test = _split(10, 6, 5)
+    result = _run(_KBack(0), train, val, test)
+    assert result.n_warmup_rows == 0
+    assert result.n_ineligible_label_rows == 0
+
+
+# ---------------------------------------------------------------------
+# Invalid label configurations must raise BEFORE any model is fitted
+# ---------------------------------------------------------------------
+
+
+class _FitCounter(_KBack):
+    def __init__(self, k=0):
+        super().__init__(k)
+        self.fit_calls = 0
+
+    def fit(self, X, y):
+        self.fit_calls += 1
+        return self
+
+
+@pytest.mark.parametrize("case", ["val_nan", "non_trailing", "overlap"])
+def test_invalid_label_configurations_raise_before_fit(case):
+    train, val, test = _split(10, 6, 5)
+    k = 0
+    if case == "val_nan":
+        val = val.copy()
+        val.loc[val.index[2], "target_t1"] = np.nan
+    elif case == "non_trailing":
+        train = train.copy()
+        train.loc[train.index[4], "target_t1"] = np.nan
+    else:
+        train, val, test = _split(4, 6, 5)
+        train = _with_ineligible_tail(train, 2)
+        k = 3
+    model = _FitCounter(k)
+    with pytest.raises(ValueError):
+        _run(model, train, val, test)
+    assert model.fit_calls == 0

@@ -43,6 +43,8 @@ class EvaluationResult:
     metrics: dict[str, dict[str, float]]
     predictions: dict[str, np.ndarray]
     actuals: dict[str, np.ndarray]
+    n_warmup_rows: int = 0
+    n_ineligible_label_rows: int = 0
 
     def __post_init__(self) -> None:
         expected = set(_PARTITIONS)
@@ -115,7 +117,10 @@ def evaluate_forecaster(
 
     Column selection is generic: X is built from
     train_df/val_df/test_df[forecaster.required_columns], so this
-    function never branches on concrete Forecaster type. Returns a
+    function never branches on concrete Forecaster type. val/test labels
+    must be finite; train may carry a trailing block of non-finite
+    (purged) labels, which is excluded from both fit and train scoring
+    but still predicted over as context for later windows. Returns a
     single validated EvaluationResult (see its __post_init__).
     """
     cols = forecaster.required_columns
@@ -126,7 +131,29 @@ def evaluate_forecaster(
         "test": test_df[target_column].to_numpy(),
     }
 
-    forecaster.fit(train_df[cols].to_numpy(), y["train"])
+    for partition in ("val", "test"):
+        if not np.isfinite(y[partition]).all():
+            raise ValueError(
+                f"{partition} contains non-finite labels; only train may contain purged (NaN) labels"
+            )
+
+    ineligible = ~np.isfinite(y["train"])
+    n_inel = int(ineligible.sum())
+    n_train = len(ineligible)
+    if n_inel > 0 and not ineligible[n_train - n_inel :].all():
+        raise ValueError(
+            "non-finite train labels must form a trailing block; a non-trailing gap "
+            "would open a hole inside sequence windows"
+        )
+
+    k = forecaster.required_history_length
+    if k + n_inel >= n_train:
+        raise ValueError(
+            "warm-up rows and label-ineligible rows overlap or leave no train rows to score"
+        )
+
+    m = n_train - n_inel
+    forecaster.fit(train_df[cols].to_numpy()[:m], y["train"][:m])
 
     # val borrows the tail of train; test borrows the tail of val; train has no predecessor.
     previous = {"train": None, "val": train_df, "test": val_df}
@@ -137,7 +164,7 @@ def evaluate_forecaster(
         p = _predict_partition(
             forecaster, cols, previous[partition], current[partition]
         )
-        valid = ~np.isnan(p)
+        valid = ~np.isnan(p) & np.isfinite(y[partition])
         preds[partition] = p[valid]
         actuals[partition] = y[partition][valid]
 
@@ -158,4 +185,6 @@ def evaluate_forecaster(
         metrics=metrics,
         predictions=preds,
         actuals=actuals,
+        n_warmup_rows=k,
+        n_ineligible_label_rows=n_inel,
     )
