@@ -13,6 +13,11 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from src.evaluation.context import (
+    audit_leading_nans,
+    drop_context_predictions,
+    take_context,
+)
 from src.evaluation.metrics import mae, mape, rmse
 from src.models.forecaster import Forecaster
 
@@ -64,6 +69,35 @@ class EvaluationResult:
             if preds.shape != actuals.shape:
                 raise ValueError(f"{partition} predictions/actuals shape mismatch")
 
+    @property
+    def n_evaluated(self) -> dict[str, int]:
+        """Rows actually scored per partition. predictions/actuals are already filtered."""
+        return {p: int(len(self.predictions[p])) for p in _PARTITIONS}
+
+
+def _predict_partition(
+    forecaster: Forecaster,
+    cols: list[str],
+    previous_df: pd.DataFrame | None,
+    current_df: pd.DataFrame,
+) -> np.ndarray:
+    """One prediction per row of current_df; NaN only where the model has no full window.
+
+    Stage 1 audits the model on the array it actually received (context + current):
+    exactly the first k positions must be NaN. Stage 2 drops the predictions that
+    belong to borrowed context rows. What remains is k - len(context) NaNs:
+    k for train (no context), 0 for val/test (context supplies all k rows), 0 for k = 0.
+    """
+    k = forecaster.required_history_length
+    context = take_context(previous_df, current_df, k)  # raises if not contiguous
+    X = np.concatenate([context[cols].to_numpy(), current_df[cols].to_numpy()], axis=0)
+
+    raw = np.asarray(forecaster.predict(X))
+    if raw.shape != (len(X),):
+        raise ValueError(f"predict must return shape ({len(X)},), got {raw.shape}")
+    audit_leading_nans(raw, k)
+    return drop_context_predictions(raw, len(context))
+
 
 def evaluate_forecaster(
     forecaster: Forecaster,
@@ -86,18 +120,26 @@ def evaluate_forecaster(
     """
     cols = forecaster.required_columns
 
-    X_train, y_train = train_df[cols].to_numpy(), train_df[target_column].to_numpy()
-    X_val, y_val = val_df[cols].to_numpy(), val_df[target_column].to_numpy()
-    X_test, y_test = test_df[cols].to_numpy(), test_df[target_column].to_numpy()
-
-    forecaster.fit(X_train, y_train)
-
-    preds = {
-        "train": forecaster.predict(X_train),
-        "val": forecaster.predict(X_val),
-        "test": forecaster.predict(X_test),
+    y = {
+        "train": train_df[target_column].to_numpy(),
+        "val": val_df[target_column].to_numpy(),
+        "test": test_df[target_column].to_numpy(),
     }
-    actuals = {"train": y_train, "val": y_val, "test": y_test}
+
+    forecaster.fit(train_df[cols].to_numpy(), y["train"])
+
+    # val borrows the tail of train; test borrows the tail of val; train has no predecessor.
+    previous = {"train": None, "val": train_df, "test": val_df}
+    current = {"train": train_df, "val": val_df, "test": test_df}
+
+    preds, actuals = {}, {}
+    for partition in _PARTITIONS:
+        p = _predict_partition(
+            forecaster, cols, previous[partition], current[partition]
+        )
+        valid = ~np.isnan(p)
+        preds[partition] = p[valid]
+        actuals[partition] = y[partition][valid]
 
     metrics = {
         partition: {

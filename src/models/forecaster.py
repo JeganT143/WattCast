@@ -47,3 +47,13 @@ class Forecaster(ABC):
     def required_columns(self) -> list[str]:
         """Column names this forecaster needs, in the order X's columns must follow."""
         ...
+
+    @property
+    def required_history_length(self) -> int:
+        """Number of preceding rows this model needs as temporal context (default 0).
+
+        Postcondition for k > 0: predict(X) still returns len(X) values, but the first k
+        may be NaN (rows with no full window). A model declaring 0 must never return NaN.
+        Sequence models must derive this from their own sequence length, never hardcode it.
+        """
+        return 0

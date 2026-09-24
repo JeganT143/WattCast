@@ -155,3 +155,116 @@ def test_evaluate_forecaster_calls_fit_exactly_once():
     )
 
     assert spy.fit_call_count == 1
+
+
+# ---------------------------------------------------------------------
+# Sequence-model contract: context, NaN audit, population semantics
+# ---------------------------------------------------------------------
+
+
+def _series(n):
+    return pd.DataFrame(
+        {
+            "date": pd.date_range("2016-01-01", periods=n, freq="10min"),
+            "Appliances": np.arange(n, dtype=float) * 10.0,
+            "target_t1": np.arange(n, dtype=float) * 10.0 + 5.0,
+        }
+    )
+
+
+def _split(n_train=10, n_val=6, n_test=5):
+    df = _series(n_train + n_val + n_test)
+    a, b = n_train, n_train + n_val
+    return (
+        df.iloc[:a].reset_index(drop=True),
+        df.iloc[a:b].reset_index(drop=True),
+        df.iloc[b:].reset_index(drop=True),
+    )
+
+
+class _KBack(Forecaster):
+    """Sequence-style stub: prediction at row i is the value k rows back.
+    The first `nan_rows` rows are NaN (defaults to k, the honest behavior)."""
+
+    def __init__(self, k, nan_rows=None):
+        self.k = k
+        self.nan_rows = k if nan_rows is None else nan_rows
+
+    @property
+    def required_columns(self):
+        return ["Appliances"]
+
+    @property
+    def required_history_length(self):
+        return self.k
+
+    def fit(self, X, y):
+        return self
+
+    def predict(self, X):
+        out = np.zeros(len(X))
+        out[self.k :] = X[: len(X) - self.k, 0]
+        out[: self.nan_rows] = np.nan
+        return out
+
+    @property
+    def params(self):
+        return {}
+
+
+def _run(forecaster, train_df, val_df, test_df):
+    return evaluate_forecaster(
+        forecaster,
+        train_df,
+        val_df,
+        test_df,
+        target_column="target_t1",
+        model_name="stub",
+        horizon=1,
+        mape_threshold=1.0,
+    )
+
+
+def test_population_semantics_for_a_sequence_model():
+    train, val, test = _split(10, 6, 5)
+    result = _run(_KBack(3), train, val, test)
+    # train loses k warm-up rows; val and test are scored on every row
+    assert result.n_evaluated == {"train": 10 - 3, "val": 6, "test": 5}
+
+
+def test_population_semantics_for_a_zero_history_model():
+    train, val, test = _split(10, 6, 5)
+    result = _run(_KBack(0), train, val, test)
+    assert result.n_evaluated == {"train": 10, "val": 6, "test": 5}
+
+
+def test_val_borrows_train_tail_and_test_borrows_val_tail():
+    train, val, test = _split(10, 6, 5)  # Appliances = 10 * row index, 0..20
+    result = _run(_KBack(3), train, val, test)
+    # first val prediction = train row 7 (value 70), not anything from val itself
+    assert result.predictions["val"][0] == 70.0
+    # first test prediction = val row 3 (value 130). A stale train tail would give 70.
+    assert result.predictions["test"][0] == 130.0
+    # train warm-up filtered from the FRONT; actuals stay aligned to their rows
+    assert result.predictions["train"][0] == 0.0
+    assert result.actuals["train"][0] == 35.0  # target of row 3
+    assert result.actuals["val"][0] == 105.0  # target of first val row
+
+
+def test_model_declaring_zero_history_but_emitting_nan_is_rejected():
+    train, val, test = _split()
+    with pytest.raises(ValueError, match="violates"):
+        _run(_KBack(k=0, nan_rows=3), train, val, test)
+
+
+def test_model_with_wrong_nan_count_is_rejected():
+    train, val, test = _split()
+    with pytest.raises(ValueError, match="violates"):
+        _run(_KBack(k=3, nan_rows=2), train, val, test)
+
+
+def test_non_contiguous_context_is_rejected():
+    df = _series(21)
+    train, val, test = df.iloc[:10], df.iloc[12:18], df.iloc[18:]  # rows 10-11 missing
+    with pytest.raises(ValueError, match="not contiguous"):
+        _run(_KBack(3), train, val, test)
