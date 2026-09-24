@@ -1,0 +1,105 @@
+{
+  "provenance": {
+    "lstm_py_sha256": "be9e8298108797592b5c478359513c1994bb971d65a6ac64fc32c36de9c81f8e",
+    "note": "generated once before the SequenceForecaster refactor; never regenerate after the refactor begins",
+    "numpy": "2.5.3",
+    "torch": "2.14.0+cpu",
+    "torch_num_threads": 4
+  },
+  "runs": [
+    {
+      "config": {
+        "huber_delta": 40.0,
+        "max_epochs": 2,
+        "seed": 42
+      },
+      "initial_output_bias": 60.0,
+      "mae": 35.4928580014794,
+      "n_evaluated": 1728,
+      "n_ineligible_label_rows": 6,
+      "n_warmup_rows": 17,
+      "params": {
+        "L": 18,
+        "batch_size": 64,
+        "dropout": 0.0,
+        "hidden_size": 64,
+        "huber_delta": 40.0,
+        "learning_rate": 0.001,
+        "loss": "huber",
+        "max_epochs": 2,
+        "num_layers": 1,
+        "optimizer": "adam",
+        "output_bias_init": "train_target_median",
+        "seed": 42,
+        "torch_num_threads": 4
+      },
+      "predictions_head": [
+        51.51650619506836,
+        51.39866638183594,
+        51.4207878112793,
+        51.32814025878906,
+        51.27467727661133
+      ],
+      "predictions_sha256": "509dfe038546cb33fcace5e2fecf7218b102a4fe24c1d646a5ed91fa9acc7b3f",
+      "predictions_tail": [
+        51.19415283203125,
+        51.110984802246094,
+        51.04585647583008,
+        50.98841094970703,
+        50.95228576660156
+      ],
+      "rmse": 87.33442827699614,
+      "training_losses": [
+        1508.9565586651422,
+        1393.4606024613918
+      ]
+    },
+    {
+      "config": {
+        "huber_delta": 40.0,
+        "max_epochs": 2,
+        "seed": 43
+      },
+      "initial_output_bias": 60.0,
+      "mae": 35.97960889780963,
+      "n_evaluated": 1728,
+      "n_ineligible_label_rows": 6,
+      "n_warmup_rows": 17,
+      "params": {
+        "L": 18,
+        "batch_size": 64,
+        "dropout": 0.0,
+        "hidden_size": 64,
+        "huber_delta": 40.0,
+        "learning_rate": 0.001,
+        "loss": "huber",
+        "max_epochs": 2,
+        "num_layers": 1,
+        "optimizer": "adam",
+        "output_bias_init": "train_target_median",
+        "seed": 43,
+        "torch_num_threads": 4
+      },
+      "predictions_head": [
+        50.227195739746094,
+        50.18782043457031,
+        50.1914176940918,
+        50.152523040771484,
+        50.121620178222656
+      ],
+      "predictions_sha256": "3edf8a8ed34e14f4f583dc09589db63424f1c612e2723efd62bd44d04bb3573f",
+      "predictions_tail": [
+        50.0149040222168,
+        49.94343566894531,
+        49.86900329589844,
+        49.81555938720703,
+        49.76227951049805
+      ],
+      "rmse": 88.03238217321727,
+      "training_losses": [
+        1513.0588928897248,
+        1400.938703631094
+      ]
+    }
+  ]
+}
