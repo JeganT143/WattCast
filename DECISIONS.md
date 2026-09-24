@@ -903,3 +903,56 @@ The immediate implementation scope is:
 **final train+validation training window → existing h=6 purge/eligibility semantics → registered scaler convention → LR `Forecaster` → MLflow champion artifact → startup-seeded rolling buffer → canonical feature pipeline → prediction → offline/serving equivalence test.**
 
 No additional model-family loaders, RF/skops packaging, or Torch serving path are required unless a later design decision explicitly expands the serving champion.
+
+## Phase 6: per-fold selection evidence, 2026-09-25
+
+**(student)**
+
+HEAD at writing: `45788c2d22f7`. The registration entry was committed and pushed before this note. The per-fold RMSE table below is the visible selection evidence; no per-fold LR table existed when the wording rule was registered.
+
+### Per-fold RMSE
+
+| Fold | LR | RF | LSTM | GRU | CNN-LSTM |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 84.641 | 88.384 | 87.546 | 89.621 | 87.554 |
+| 2 | 89.981 | 87.720 | 93.560 | 93.692 | 94.576 |
+| 3 | 92.206 | 91.984 | 95.785 | 93.376 | 97.474 |
+| 4 | 89.393 | 89.476 | 92.469 | 92.662 | 88.598 |
+| 5 | 73.971 | 76.948 | 74.129 | 79.737 | 75.295 |
+| 6 | 87.877 | 88.310 | 94.838 | 92.650 | 95.304 |
+| 7 | 99.069 | 100.092 | 103.025 | 102.250 | 106.215 |
+| 8 | 82.061 | 78.740 | 84.516 | 79.974 | 79.671 |
+| **Mean** | **87.400** | **87.707** | **90.733** | **90.495** | **90.586** |
+
+For the deep models, the three seed results were reduced to one arithmetic mean per fold before comparison with LR.
+
+The pre-registered wording rule produced:
+
+* **RF:** LR wins 5/8 folds. Removing the single fold contributing the largest share of LR's mean advantage, fold 1, leaves a 7-fold mean advantage of **−0.184 RMSE** instead of **+0.307 RMSE**. The sign changes, so the RF result is flagged as concentrated.
+* **LSTM:** LR wins 8/8 folds; the largest single-fold advantage is fold 6 and removing it reduces the mean advantage from **+3.334** to **+2.815**, a 15.5% shrink.
+* **GRU:** LR wins 7/8 folds; the largest single-fold advantage is fold 5 and removing it reduces the mean advantage from **+3.095** to **+2.714**, a 12.3% shrink.
+* **CNN-LSTM:** LR wins 6/8 folds; the largest single-fold advantage is fold 6 and removing it reduces the mean advantage from **+3.186** to **+2.580**, a 19.0% shrink.
+
+The recomputed mean in the removal test means the arithmetic mean over the **remaining seven folds**.
+
+The rule therefore changes the wording of the RF evidence but **does not change the serving champion**. The RF result should not be described as LR beating RF on this evidence. The RF per-fold signs are also unstable: LR has a +3.743 advantage in fold 1 but a −3.321 disadvantage in fold 8.
+
+For the three deep comparators, the rule does not trigger either branch. This is an **RMSE-only description**; it is not a claim of overall model superiority. The existing MAE/MAPE results and the different Huber versus squared-loss objectives remain relevant limitations.
+
+### Incidental exposure and provenance
+
+Fold 1 is also the fold that triggers the RF concentration rule. During the earlier record-head inspection, I had incidentally seen LR's fold-1 RMSE (`84.641`), along with persistence and seasonal values and RF's MAE and MAPE; RF's fold-1 RMSE (`88.384`) was cut off. The wording rule had already been fixed before the full table was inspected, so this incidental exposure did not determine or tune the rule.
+
+### Post-hoc RF tie-breaker
+
+The RMSE evidence does not establish a meaningful distinction between LR and RF under the registered robustness rule. Retaining LR is therefore additionally supported by post-hoc operational considerations: a simpler serving artifact, expected lower single-row serving latency, and avoidance of an additional `skops` serialization/loading boundary. None of those operational properties was measured in this note; they are deployment reasoning, not measured selection evidence.
+
+### Scope and limitations
+
+The walk-forward results are selection evidence, not measurements of the final registered serving artifact. Artifact measurements and serving equivalence will be performed separately.
+
+The eight folds are expanding-window slices from one 138-day period rather than independent datasets. Fold 8 is descriptively the latest fold and is where LR is weaker against RF, GRU, and CNN-LSTM; fold 8 also lies within the validation window already identified as a limitation. This observation is exploratory and does not change the champion or the registered wording rule.
+
+The six existing test evaluations remain the only test evaluations. No test evaluation was added by this per-fold analysis. Any future comparison of historical replay forecasts with held-out actual values, including a Phase 7 backfill, must receive its own dated registration and explicitly account for the six existing evaluations.
+
+The serving champion remains **linear regression**. This note records how the pre-registered wording rule applies to the visible walk-forward evidence; it does not revise the champion decision.
