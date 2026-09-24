@@ -620,3 +620,39 @@ Feature-frame timestamps: first row 2016-01-12 17:00:00, 19,585 rows, strictly i
 
 ### Not yet applied
 The label purge (labels of the last 6 train rows) and the per-fold train-only scaler are not part of make_folds; they belong to the runner and the scaling split, which are not built.
+
+## Phase 5: pre-run record for the walk-forward run, 2026-09-24
+
+### Status
+Written and committed before the walk-forward run is launched. It changes no rule: the comparison rule, references, margin, seeds, fold scheme and configurations registered in "Phase 5: walk-forward comparison rule (pre-registration)" stand, as does the measured fold table. Append-only. Any change to the run after launch needs a new dated entry that states what already existed.
+
+### Authorship
+Drafted by an AI mentor (Claude) from the committed code and the earlier registered entries; executed by Claude Code. No student-authored reasoning in this entry.
+
+### Code state
+Code commit at drafting: 78a2e70dbeeec31f1f5d02a40b38de5690cde3f1 ("feat(evaluation): walk-forward run module; JSONL appended per record, refuses to overwrite, summary written once"). The run must be launched from a clean working tree whose HEAD equals origin/master. The summary file records the HEAD SHA and a dirty-tree flag; a dirty flag or a HEAD other than the commit containing this entry is reported in the results entry.
+
+### What has and has not touched real folds
+- Deterministic models (naive persistence, linear regression, random forest) were fitted and scored on real-data folds inside pytest (tests/test_walk_forward.py and tests/test_walk_forward_run.py). Those tests assert counts, structure, independent arithmetic and oracle equalities; no metric value from a real-data fold was printed, stored or inspected by the student or the mentor.
+- No neural model (LSTM, GRU, CNN-LSTM) has been fitted or scored on any walk-forward fold. The GRU and CNN-LSTM smoke tests ran one epoch on train_t6.csv and val_t6.csv (the Phase 4 partitions) and asserted only finiteness and counts. The LSTM golden (two seeds, 2 epochs, same partitions) is exact-equality against a fixture generated before the SequenceForecaster refactor.
+- The test partition is not used: no fold reaches 2016-04-30, the number of test evaluations stays at six.
+- Therefore no walk-forward fold result exists outside test scaffolding.
+
+### Run plan
+- Seven models at horizon 6, eight expanding folds (first evaluation start 2016-03-01 00:00, 7-day windows), per-fold train-only scaler, label purge of the last 6 train labels.
+- Deterministic: naive_persistence, naive_seasonal, linear_regression, random_forest (constructions mirror tests/golden.py: no arguments for linear regression and random forest). Neural, seeds 42, 43, 44: lstm (registered configuration: 50 epochs, Huber delta 40, hidden 64, 1 layer, dropout 0, Adam 1e-3, batch 64, L 18, 4 threads), gru (identical settings), cnn_lstm (identical settings; Conv1d 16 to 32 channels, kernel 3, padding 1, ReLU, then LSTM 32 to 64 and a Linear head, fixed in the CNN-LSTM implementation commit before any fold ran).
+- Expected records: 8 folds x (4 + 3 x 3) = 104, in results/walk_forward_records.jsonl, one JSON line per record, written and flushed as each fit finishes. The summary results/walk_forward_summary.json is written once at the end with provenance (HEAD, dirty flag, versions, fold table, model names).
+- Command: python -m src.evaluation.walk_forward_run --out-dir results (run with nohup in the background, output to a log outside the repository).
+- Cost: 72 neural fits at an unmeasured 25 to 60 seconds each (a 2-epoch golden fit takes about 2 seconds; 50 epochs is an extrapolation, not a measurement); the first records will measure it.
+- Failure handling: a crashed run keeps its partial records file; it is moved aside (not deleted) and the run is repeated from scratch; no resume. A failed or repeated run changes no rule. No code change is allowed between launch and completion.
+
+### Reporting commitment
+The results entry reports all six registered verdicts (LSTM, GRU, CNN-LSTM against linear_regression and random_forest) together, whatever they are, plus the Tier 2 numbers as computed by the summary, the folds 1-6 sensitivity, the disclosure that only the LSTM had a validation grid, and the known limits already registered. "Not shown" and "shown worse" are legitimate outcomes.
+
+### Known limits and open follow-ups
+- Results are written as JSONL and JSON, not logged to MLflow; MLflow logging of these runs and registration of a final model (a Phase 6 prerequisite) remain open.
+- The four owed DECISIONS.md entries from the Phase 4 handoff (two-tier golden bar, array-layout finding, purge design, DVC remote path) are still owed in the student's words.
+- One house, one 138-day stretch; folds are not fresh data.
+
+### Amendments
+None.
