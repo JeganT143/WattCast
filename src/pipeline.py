@@ -15,6 +15,8 @@ Pipeline:
            columns needed by non-learned baselines: Appliances[t] for
            the naive persistence baseline, and Appliances[t+h-144] for
            the naive seasonal baseline, per horizon)
+        -> purge of train labels that point past the train boundary
+           (rows kept, labels set to NaN)
 """
 
 from dataclasses import dataclass
@@ -31,6 +33,7 @@ from config.features import (
     BASELINE_CONTEXT_LAGS,
 )
 from src.data.assemble import build_horizon_dataset
+from src.data.purge import mask_ineligible_labels
 from src.data.split import create_time_masks
 from src.features.build_features import build_features
 from src.preprocessing.scaling import fit_scaler, transform_with_scaler
@@ -85,6 +88,8 @@ def run_pipeline(df_raw: pd.DataFrame) -> PipelineResult:
     the naive baselines (see _context_columns_for_horizon) alongside the
     engineered FEATURE_COLUMNS — without adding raw/baseline-only values
     to the learned-model feature contract itself.
+
+    After assembly, train labels that point at or beyond SPLIT_TRAIN_END are masked to NaN (rows are kept).
     """
 
     # 1. Feature engineering on the full continuous series. This includes
@@ -171,6 +176,14 @@ def run_pipeline(df_raw: pd.DataFrame) -> PipelineResult:
         "target_t6",
         context_columns=_context_columns_for_horizon(6),
     )
+
+    # 6. Purge label-ineligible train targets. The last h train rows carry labels whose
+    #    timestamps (date + h * 10 min) fall in the validation period. The rows stay:
+    #    their features are valid history and deleting them would open a gap in the
+    #    validation context. Only the labels are masked (NaN). Val and test are untouched.
+    boundary = pd.Timestamp(SPLIT_TRAIN_END)
+    train_t1 = mask_ineligible_labels(train_t1, "target_t1", 1, boundary)
+    train_t6 = mask_ineligible_labels(train_t6, "target_t6", 6, boundary)
 
     return PipelineResult(
         scaler=scaler,

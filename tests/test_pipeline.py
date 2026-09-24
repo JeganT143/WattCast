@@ -3,6 +3,7 @@
 import numpy as np
 import pandas as pd
 
+from config.features import SPLIT_TRAIN_END
 from src.pipeline import PipelineResult, run_pipeline
 
 
@@ -93,22 +94,18 @@ def test_run_pipeline_outputs_have_expected_columns():
         assert set(dataset.columns) == expected_t6
 
 
-def test_run_pipeline_outputs_contain_no_nans():
+def test_run_pipeline_outputs_contain_no_nans_except_purged_train_labels():
     df = make_synthetic_raw_data()
 
     result = run_pipeline(df)
 
-    datasets = [
-        result.train_t1,
-        result.val_t1,
-        result.test_t1,
-        result.train_t6,
-        result.val_t6,
-        result.test_t6,
-    ]
-
-    for dataset in datasets:
-        assert dataset.isna().sum().sum() == 0
+    for horizon in ("t1", "t6"):
+        target = f"target_{horizon}"
+        for name in ("train", "val", "test"):
+            dataset = getattr(result, f"{name}_{horizon}")
+            assert dataset.drop(columns=[target]).isna().sum().sum() == 0, (name, horizon)
+            if name != "train":
+                assert dataset[target].isna().sum() == 0, (name, horizon)
 
 
 def test_run_pipeline_preserves_chronological_partition_order():
@@ -179,3 +176,51 @@ def test_run_pipeline_appliances_context_column_is_unscaled():
             expected.reset_index(drop=True),
             check_names=False,
         )
+
+
+# ---------------------------------------------------------------------
+# Purge: train labels pointing past SPLIT_TRAIN_END are masked, never dropped
+# ---------------------------------------------------------------------
+
+_STEP = pd.Timedelta(minutes=10)
+_BOUNDARY = pd.Timestamp(SPLIT_TRAIN_END)
+
+
+def test_purge_masks_exactly_the_last_h_train_labels():
+    result = run_pipeline(make_synthetic_raw_data())
+    for h in (1, 6):
+        target = getattr(result, f"train_t{h}")[f"target_t{h}"]
+        assert target.isna().sum() == h, h
+        assert target.iloc[-h:].isna().all(), h
+        assert target.iloc[:-h].notna().all(), h
+
+
+def test_purge_keeps_the_feature_rows():
+    result = run_pipeline(make_synthetic_raw_data())
+    for h in (1, 6):
+        train = getattr(result, f"train_t{h}")
+        assert train["date"].max() == _BOUNDARY - _STEP, h
+        feature_columns = [c for c in train.columns if c != f"target_t{h}"]
+        assert train[feature_columns].isna().sum().sum() == 0, h
+
+
+def test_purge_leaves_unmasked_train_labels_equal_to_the_raw_future_value():
+    df = make_synthetic_raw_data()
+    raw = df.set_index("date")["Appliances"]
+    result = run_pipeline(df)
+    for h in (1, 6):
+        kept = getattr(result, f"train_t{h}").iloc[:-h]
+        expected = (kept["date"] + h * _STEP).map(raw)
+        assert kept[f"target_t{h}"].tolist() == expected.tolist(), h
+
+
+def test_purge_does_not_touch_val_or_test_labels():
+    df = make_synthetic_raw_data()
+    raw = df.set_index("date")["Appliances"]
+    result = run_pipeline(df)
+    for h in (1, 6):
+        for name in ("val", "test"):
+            part = getattr(result, f"{name}_t{h}")
+            assert part[f"target_t{h}"].notna().all(), (name, h)
+            expected = (part["date"] + h * _STEP).map(raw)
+            assert part[f"target_t{h}"].tolist() == expected.tolist(), (name, h)

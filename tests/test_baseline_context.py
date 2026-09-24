@@ -107,15 +107,12 @@ def test_baseline_context_lags_are_unscaled():
 def test_baseline_context_lags_produce_no_nans_after_assembly():
     result = run_pipeline(make_synthetic_raw_data())
 
-    for dataset in [
-        result.train_t1,
-        result.val_t1,
-        result.test_t1,
-        result.train_t6,
-        result.val_t6,
-        result.test_t6,
-    ]:
-        assert dataset.isna().sum().sum() == 0
+    # Feature and context columns must be NaN-free. Target columns are excluded here:
+    # the purge deliberately masks the last h train labels (covered in tests/test_pipeline.py).
+    for horizon in ("t1", "t6"):
+        for name in ("train", "val", "test"):
+            dataset = getattr(result, f"{name}_{horizon}")
+            assert dataset.drop(columns=[f"target_{horizon}"]).isna().sum().sum() == 0, (name, horizon)
 
 
 # ---------------------------------------------------------------------
