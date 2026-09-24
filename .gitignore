@@ -9,4 +9,19 @@ __pycache__/
 .pytest_cache/
 .ipynb_checkpoints/
 *.egg-info/
-.DS_Store   
+.DS_Store
+# Python
+*.py[cod]
+.ruff_cache/
+# Environments
+/env/
+/.venv/
+# MLflow local stores (recreated by running the tracking code)
+/db/
+/models/
+/mlruns/
+# OS / editor
+.idea/
+.vscode/
+
+.claude/
