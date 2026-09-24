@@ -758,3 +758,148 @@ The disclosure that matters most to me is the one-sided LSTM tuning. The LSTM co
 
 ### Amendments
 None.
+
+## Phase 6: serving registration, 2026-09-25
+
+**(student)**
+
+**HEAD at writing:** `d783bf1`
+**Tests at writing:** 451 passed
+**Per-fold LR RMSE table:** not yet computed.
+
+### 1. Champion criterion and selection evidence
+
+The serving champion is **linear regression**, selected as a **post-hoc deployment judgment** after the Phase 5 results were available. RMSE was chosen as the primary criterion because this is point energy forecasting and larger forecast errors have greater operational significance. This is a deployment-specific criterion, not a universal claim that RMSE is preferable to MAE.
+
+The meaningful comparator set is **RF, LSTM, GRU, and CNN-LSTM**. Persistence remains a descriptive baseline but is not treated as a substantive comparator for the champion decision.
+
+The existing deep-model walk-forward records contain three seeds per model. For the per-fold comparison, the three seed results for each deep model are reduced to **one mean RMSE per fold**, then the resulting eight fold values are compared with LR's eight fold values.
+
+Before inspecting the per-fold table, the wording-robustness rule is fixed as follows:
+
+* If LR has an RMSE advantage on fewer than **5 of 8 folds** against a comparator, wording implying a broad per-fold advantage will be softened.
+* For each comparator separately, identify the single fold contributing the largest share of LR's mean RMSE advantage. Remove that fold and recompute the mean advantage. If the resulting advantage **shrinks by more than 50% or changes sign**, the wording will describe the mean result as concentrated/sensitive to that fold.
+* This rule applies independently to all four comparators.
+* This rule can **soften the description of the selection evidence; it cannot change the serving champion**. The champion remains the post-hoc deployment choice unless a separate future decision explicitly changes it.
+
+I incidentally saw part of fold 1 while inspecting the record-file head before the per-fold analysis: persistence, seasonal, and LR RMSE/MAE/MAPE were visible, and RF's MAE and MAPE were visible while its RMSE line was cut off. These incidental values are not being treated as the per-fold analysis and will not be copied into the measured selection evidence.
+
+The selection evidence remains separate from artifact measurement: walk-forward results justify the deployment decision, while the final registered artifact's metrics and serving equivalence are measured separately.
+
+The Huber-loss difference is also kept separate from the RMSE criterion. LR is trained with squared loss while the neural models use Huber loss, so their error profiles reflect different training objectives as well as different model classes. The operational serving argument is likewise separate: the LR serving path is intended not to require PyTorch, reducing serving dependency/operational complexity. This will be verified at the **actual service entry point** with a startup test asserting that `'torch' not in sys.modules`.
+
+### 2. Final training window and test-partition boundary
+
+The final training window will be built as a **train-only composition of the existing feature-frame, target-building, purge, and eligibility pieces**, rather than by calling `build_fold_datasets` with an evaluation side covering the test partition.
+
+This keeps the final-training path from materialising test rows and makes the statement "test partition untouched" literal. No test-side `FoldSpec` is created for the final training operation.
+
+The h=6 purge remains the existing shared `mask_ineligible_labels` mechanism. The separate **fit-exclusion** logic is the trailing-non-finite handling currently duplicated in the committed evaluators/harness. I will extract that logic into a shared helper rather than creating a third inline copy. This is a small refactoring beyond pure serving, but it prevents the final training path from silently developing different eligibility semantics from the code that produced the committed results.
+
+Behaviour preservation is established by the existing **451 passing tests and the two existing golden fixtures**; the Phase 3–5 results will not be re-run merely to validate this refactor.
+
+The scaler convention is intentionally the existing registered convention: fit `StandardScaler` on the **untrimmed feature frame** using the date mask `< 2016-04-30`, allowing each column to contribute its own finite/non-NaN rows. This preserves comparability with `run_pipeline` and the walk-forward runner.
+
+The expected counts under this convention are:
+
+* 15,738 rows under the date mask;
+* 15,594 finite rows for `lag_144`;
+* 15,588 fittable rows after the h=6 target eligibility purge.
+
+The six existing LSTM test evaluations remain the only test evaluations. No new test evaluation is performed by this registration, final training, or serving-equivalence work.
+
+### 3. Serving request, warm-up, and restart contract
+
+The serving contract is:
+
+**request = timestamp + current `Appliances` observation; append-and-predict is one operation.**
+
+The server rejects:
+
+* duplicate timestamps;
+* timestamps that are not exactly the required 10-minute successor of the current buffer endpoint.
+
+If insufficient history exists, the response is explicitly **"insufficient history"** rather than silently fabricating missing observations or shifting the timestamp.
+
+The normal serving process is initialized by **startup seeding from stored historical data**. The seed ends at the final pre-test timestamp:
+
+**2016-04-29 23:50.**
+
+The first accepted live/request timestamp is therefore:
+
+**2016-04-30 00:00.**
+
+The seed itself contains no test-partition rows. A client must not replay the seed rows as new observations; doing so violates the timestamp contract and is not valid serving input.
+
+After a restart, the server repeats the same startup seeding from the stored historical source, ending at `2016-04-29 23:50`; the next accepted request is again the successor timestamp. This makes restart behaviour deterministic without requiring 144 rejected calls.
+
+The stored historical seed is a serving dependency. The serving implementation must not silently source additional rows from the test partition merely to satisfy buffer initialization. Ordinary inference is not an evaluation by itself.
+
+If serving traffic is a historical replay after `2016-04-30 00:00`, that replay is still valid serving traffic. However, **comparing those forecasts with actual test-partition values, including any Phase 7 backfill job, constitutes a new test evaluation** and requires its own dated registration explicitly stating that six test evaluations already exist.
+
+### 4. Required history and feature selection
+
+The buffer length is derived from the feature pipeline rather than hard-coded from `SEASONAL_PERIOD`:
+
+`required_raw_history = max(max(LAG_STEPS), max(ROLLING_WINDOWS)) + 1`
+
+For the current feature configuration, the expected value is:
+
+**145 raw observations.**
+
+This corresponds to observations `t-144 ... t` when the feature row at `t` reads the current `Appliances[t]` observation. The resulting h=6 forecast timestamp is **t+6**, i.e. 60 minutes after `t` on the 10-minute grid.
+
+The serving feature builder selects model inputs using **`FEATURE_COLUMNS` by explicit name and order**. It never uses "everything except target columns", because `build_features(..., target_horizons=[])` still produces baseline-context columns such as `lag_138` and `lag_143`.
+
+The serving request therefore carries the timestamp and current `Appliances` value, while the server-side rolling buffer supplies the preceding history needed by the canonical feature pipeline.
+
+### 5. Equivalence criteria
+
+Two separate pre-run equivalence bars are registered.
+
+**Feature-row equivalence**
+
+The serving feature row is compared with the offline reference produced by the canonical `build_features` call on the **full feature series**, using the final feature configuration and selecting the same `FEATURE_COLUMNS` in the same order.
+
+The comparison is performed on **unscaled/raw feature values**, before `StandardScaler`. This avoids making near-zero scaled values artificially sensitive to tiny raw floating-point differences.
+
+The reference timestamps are selected from the eligible **pre-2016-04-30** portion of the data, so the equivalence test does not consume the held-out test partition.
+
+**Prediction equivalence**
+
+For each selected timestamp, the serving path constructs a **single row with the actual LR input width confirmed by `sklearn_models.py`**, applies the registered final scaler, and calls the registered LR `Forecaster`.
+
+The offline reference uses the **same final scaler and final LR artifact**, applied to the corresponding batch of canonical offline feature rows. Thus the comparison is:
+
+`serving feature row → final scaler → LR prediction`
+
+against
+
+`offline canonical feature batch → final scaler → LR prediction`.
+
+My prediction before running the test is that the LR serving prediction will also match within **relative tolerance `1e-12`**.
+
+The pre-run numerical criterion for both comparisons is:
+
+`abs(a - b) <= max(1e-12 * abs(b), absolute_floor)`
+
+The absolute floors are fixed now:
+
+* **Raw feature floor: `1e-12 Wh`**, chosen to remain above expected double-precision arithmetic noise at the approximately 10–1,000 Wh feature scale while remaining negligible relative to the feature magnitudes.
+* **Prediction floor: `1e-10 Wh`**, chosen to accommodate accumulated floating-point arithmetic through scaling and the LR dot product while remaining negligible relative to the forecast scale.
+
+These floors are fixed before the equivalence run and cannot be adjusted to fit observed differences.
+
+My prediction is that pandas rolling standard deviation will remain within the `1e-12` relative criterion for the tested non-constant windows. For a constant rolling window, I am **uncertain** whether the exact serving/offline calculation will produce identical zero output in every relevant case, so the test must measure it rather than assume it.
+
+If either equivalence bar fails, the result is reported rather than silently relaxing the tolerance. Any later change to either registered bar or floor requires a new dated decision entry.
+
+### 6. Scope
+
+This registration records the deployment decision and the constraints governing Phase 6 implementation.
+
+The immediate implementation scope is:
+
+**final train+validation training window → existing h=6 purge/eligibility semantics → registered scaler convention → LR `Forecaster` → MLflow champion artifact → startup-seeded rolling buffer → canonical feature pipeline → prediction → offline/serving equivalence test.**
+
+No additional model-family loaders, RF/skops packaging, or Torch serving path are required unless a later design decision explicitly expands the serving champion.
