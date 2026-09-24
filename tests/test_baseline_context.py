@@ -7,11 +7,9 @@ baseline's required_columns for each forecast horizon.
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from src.features.build_features import build_features
 from src.pipeline import run_pipeline
-from config.features import BASELINE_CONTEXT_LAGS
 
 
 def make_synthetic_raw_data():

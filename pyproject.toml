@@ -1,0 +1,10 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 120
+extend-exclude = ["notebooks", "env"]
+
+[tool.ruff.lint]
+select = ["F", "E9"]

@@ -5,7 +5,6 @@ import pandas as pd
 import pytest
 
 from src.models.naive import NaivePersistenceForecaster, NaiveSeasonalForecaster
-from config.features import BASELINE_CONTEXT_LAGS
 
 # ---------------------------------------------------------------------
 # NaivePersistenceForecaster

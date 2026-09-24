@@ -18,7 +18,7 @@ import mlflow
 import mlflow.sklearn
 import pandas as pd
 
-from config.mlflow_config import ARTIFACT_ROOT, EXPERIMENT_NAME, TRACKING_URI
+from config.mlflow_config import EXPERIMENT_NAME, TRACKING_URI
 from src.evaluation.harness import EvaluationResult
 from src.models.forecaster import Forecaster
 

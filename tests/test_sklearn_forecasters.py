@@ -112,7 +112,6 @@ def test_random_forest_is_reproducible_with_fixed_random_state():
 @pytest.mark.parametrize("cls", [LinearRegressionForecaster, RandomForestForecaster])
 def test_end_to_end_through_evaluation_harness(cls):
     n_train, n_val, n_test = 30, 10, 10
-    n_features = len(FEATURE_COLUMNS)
     rng = np.random.default_rng(2)
 
     def make_df(n, offset):

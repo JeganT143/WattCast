@@ -7,7 +7,6 @@ import numpy as np
 import pytest
 
 from src.evaluation.harness import EvaluationResult
-from src.models.forecaster import Forecaster
 from src.models.naive import NaivePersistenceForecaster
 from src.models.sklearn_models import LinearRegressionForecaster
 from src.tracking.mlflow_logger import log_evaluation_result
