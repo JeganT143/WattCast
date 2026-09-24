@@ -302,3 +302,41 @@ Validation is the middle amplitude regime (STL finding), so tuned settings may n
 validation labels point into the test period (at most 6 of 1,728 rows; never trained on). The Random Forest baseline
 moved up to 0.94% on val from 6 fewer training rows: gaps of that size are not evidence. Phase 3 MLflow runs used
 the unpurged data and are slightly stale against the fixture.
+
+## Phase 4: pre-run measurements, 2026-09-24
+
+Measured at HEAD 6655b54 (LSTMForecaster committed; selection module not yet), before any tuning run. This entry records
+measurements only. It does not modify the pre-registration (f31c3aa) or the selection rule.
+
+### What was run
+An inline, uncommitted script fitted LSTMForecaster three times on data/processed/train_t6.csv only (13,860 eligible rows
+after dropping NaN targets; 16 feature columns; 13,843 windows at L=18), each with seed=42, huber_delta=20.0, max_epochs=3
+and the default architecture and optimizer settings (hidden_size 64, num_layers 1, dropout 0, learning_rate 1e-3,
+batch_size 64). Two fits used torch_num_threads=4 (A4, B4); one used torch_num_threads=1 (C1). Each fit was followed by
+predict on the same train rows. No validation or test file was opened. Machine: Linux x86_64, 12 cores, 7,115 MB RAM
+(torch default 8 threads).
+
+### Repeatability at 4 threads
+A4 and B4 produced bitwise-identical predictions (max absolute difference 0.0 Wh; NaN positions equal) and bitwise-identical
+per-epoch training losses [847.262, 780.865, 749.013] (printed to 3 decimals).
+
+### Thread count changes the result
+C1 (1 thread) differed from A4 (4 threads): the epoch-1 loss agreed at the printed precision (847.262); the epoch-2 and
+epoch-3 losses were 781.03 and 748.192 against 780.865 and 749.013; predictions differed by up to 35.36 Wh after 3 epochs.
+The cause of this difference was not isolated, and no explanation is claimed. The protocol fixes torch_num_threads = 4 and
+records it in params; that is unchanged.
+
+### Cost
+Wall time per epoch: A4 1.00 s, B4 0.65 s, C1 1.16 s (range 0.65-1.16 s/epoch; the two identical 4-thread fits differed
+in time). Peak process RSS 554-569 MB during the three fits (344 MB before them), approximately 570 MB.
+
+### Reference-loader honesty point
+load_val_reference (src/tuning/selection.py, commit a7cfb2f) parses the whole golden fixture, which also contains the
+linear_regression|h6 test metrics, so the parse loads them into memory. The function indexes only val_mae and val_rmse and
+returns only those two values; a synthetic-fixture test (with distinctive test values) and a grep gate (no test metric names
+in the module) check this. The isolation guarantee is about what is indexed and returned, not about what the file parse loads.
+
+### Test evaluations to date
+Zero. No LSTM has been fitted or evaluated on the real validation or test partitions, and no test metric or test
+prediction has been computed for any LSTM. The measurement fits above used the train partition only; unit tests use
+synthetic data only.
