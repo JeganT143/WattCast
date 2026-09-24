@@ -587,3 +587,36 @@ The LSTM is at or below 1 on MAE and at or above 1 on RMSE against linear_regres
 
 ### Amendments
 None.
+
+## Phase 5: measured fold table (non-rule note), 2026-09-24
+
+### Status
+Records measured values from make_folds (commit 083d3b5, "feat(evaluation): make_folds, pure expanding-window fold generator for the registered walk-forward scheme") run on the real timestamps. It changes no rule: the comparison rule, references, margin, seeds and configurations registered in "Phase 5: walk-forward comparison rule (pre-registration)" stand. No fold has been trained or scored; no fold result exists.
+
+### Authorship
+Drafted by an AI mentor (Claude) from the raw make_folds output the student pasted; executed by Claude Code. No student-authored reasoning in this entry.
+
+### Measured fold table (holdout_start = 2016-04-30 from val_end in split_boundaries.json)
+Feature-frame timestamps: first row 2016-01-12 17:00:00, 19,585 rows, strictly increasing. Every fold: train_start 2016-01-12 17:00:00, train_end = eval_start (exclusive), n_eval 1,008.
+
+| fold | eval_start | eval_end (exclusive) | n_train |
+|---|---|---|---|
+| 1 | 2016-03-01 00:00 | 2016-03-08 00:00 | 6,954 |
+| 2 | 2016-03-08 00:00 | 2016-03-15 00:00 | 7,962 |
+| 3 | 2016-03-15 00:00 | 2016-03-22 00:00 | 8,970 |
+| 4 | 2016-03-22 00:00 | 2016-03-29 00:00 | 9,978 |
+| 5 | 2016-03-29 00:00 | 2016-04-05 00:00 | 10,986 |
+| 6 | 2016-04-05 00:00 | 2016-04-12 00:00 | 11,994 |
+| 7 | 2016-04-12 00:00 | 2016-04-19 00:00 | 13,002 |
+| 8 | 2016-04-19 00:00 | 2016-04-26 00:00 | 14,010 |
+
+### Corrections to the registration's estimates (not rule changes)
+- The registration gave the first training row as 2016-01-11 17:00 and estimated about 7,100 (fold 1) and about 14,150 (fold 8) training rows. The measured first row is 2016-01-12 17:00, one day later than the raw series start, because the lag_144 feature removes the first 144 rows. Measured counts are 6,954 and 14,010. The registration already states that make_folds records the exact counts; the measured values supersede the estimates.
+- The unused tail is 2016-04-26 to 2016-04-30 (4 days). No evaluation window reaches 2016-04-30, the start of the test partition.
+
+### Facts relevant to the registered overlap flag
+- Validation is 2016-04-18 to 2016-04-30. Fold 7's evaluation window (2016-04-12 to 2016-04-19) shares one day with it; fold 8's (2016-04-19 to 2016-04-26) lies entirely inside it. This matches the registered flag for folds 7 and 8.
+- Fold 8's training set (14,010 rows, through 2016-04-18 23:50) is 144 rows, one day, larger than the LSTM's registered training partition (13,866 rows, before 2016-04-18), so it contains the first validation day.
+
+### Not yet applied
+The label purge (labels of the last 6 train rows) and the per-fold train-only scaler are not part of make_folds; they belong to the runner and the scaling split, which are not built.
