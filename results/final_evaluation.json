@@ -1,0 +1,314 @@
+{
+  "baselines": {
+    "linear_regression|h1": {
+      "test_mae": 27.155401825075774,
+      "test_mape": 24.90432260507825,
+      "test_rmse": 59.71217603563066
+    },
+    "linear_regression|h6": {
+      "test_mae": 42.39131825471337,
+      "test_mape": 41.70360509497732,
+      "test_rmse": 80.61873658942119
+    },
+    "naive_persistence|h1": {
+      "test_mae": 26.496496496496498,
+      "test_mape": 21.65630543850727,
+      "test_rmse": 66.14208021203125
+    },
+    "naive_persistence|h6": {
+      "test_mae": 47.59959909797043,
+      "test_mape": 40.4292516007141,
+      "test_rmse": 103.62473494686884
+    },
+    "naive_seasonal|h1": {
+      "test_mae": 53.71871871871872,
+      "test_mape": 51.131543387584976,
+      "test_rmse": 112.28917516332044
+    },
+    "naive_seasonal|h6": {
+      "test_mae": 53.7759959909797,
+      "test_mape": 51.17656125737151,
+      "test_rmse": 112.35837712894336
+    },
+    "random_forest|h1": {
+      "test_mae": 32.459559023309026,
+      "test_mape": 30.571978841867768,
+      "test_rmse": 65.86605553170284
+    },
+    "random_forest|h6": {
+      "test_mae": 45.118215985968426,
+      "test_mape": 45.340387522642686,
+      "test_rmse": 83.06497856494028
+    }
+  },
+  "horizons": {
+    "1": {
+      "runs": [
+        {
+          "n_evaluated": {
+            "test": 3996,
+            "train": 13848,
+            "val": 1728
+          },
+          "n_ineligible_label_rows": 1,
+          "n_warmup_rows": 17,
+          "params": {
+            "L": 18,
+            "batch_size": 64,
+            "dropout": 0.0,
+            "hidden_size": 64,
+            "huber_delta": 40.0,
+            "learning_rate": 0.001,
+            "loss": "huber",
+            "max_epochs": 50,
+            "num_layers": 1,
+            "optimizer": "adam",
+            "output_bias_init": "train_target_median",
+            "seed": 42,
+            "torch_num_threads": 4
+          },
+          "seed": 42,
+          "test_mae": 28.449426743599986,
+          "test_mape": 23.186107357380024,
+          "test_rmse": 65.40315610855326
+        },
+        {
+          "n_evaluated": {
+            "test": 3996,
+            "train": 13848,
+            "val": 1728
+          },
+          "n_ineligible_label_rows": 1,
+          "n_warmup_rows": 17,
+          "params": {
+            "L": 18,
+            "batch_size": 64,
+            "dropout": 0.0,
+            "hidden_size": 64,
+            "huber_delta": 40.0,
+            "learning_rate": 0.001,
+            "loss": "huber",
+            "max_epochs": 50,
+            "num_layers": 1,
+            "optimizer": "adam",
+            "output_bias_init": "train_target_median",
+            "seed": 43,
+            "torch_num_threads": 4
+          },
+          "seed": 43,
+          "test_mae": 28.4564446047381,
+          "test_mape": 23.638849508733365,
+          "test_rmse": 65.03395246812623
+        },
+        {
+          "n_evaluated": {
+            "test": 3996,
+            "train": 13848,
+            "val": 1728
+          },
+          "n_ineligible_label_rows": 1,
+          "n_warmup_rows": 17,
+          "params": {
+            "L": 18,
+            "batch_size": 64,
+            "dropout": 0.0,
+            "hidden_size": 64,
+            "huber_delta": 40.0,
+            "learning_rate": 0.001,
+            "loss": "huber",
+            "max_epochs": 50,
+            "num_layers": 1,
+            "optimizer": "adam",
+            "output_bias_init": "train_target_median",
+            "seed": 44,
+            "torch_num_threads": 4
+          },
+          "seed": 44,
+          "test_mae": 28.699694355686862,
+          "test_mape": 23.753522541587657,
+          "test_rmse": 65.88337898504562
+        }
+      ],
+      "summary": {
+        "test_mae": {
+          "mean": 28.535188568008312,
+          "std": 0.14250939698329626
+        },
+        "test_mape": {
+          "mean": 23.52615980256702,
+          "std": 0.3000237077703013
+        },
+        "test_rmse": {
+          "mean": 65.44016252057504,
+          "std": 0.4259207177509653
+        }
+      }
+    },
+    "6": {
+      "runs": [
+        {
+          "n_evaluated": {
+            "test": 3991,
+            "train": 13843,
+            "val": 1728
+          },
+          "n_ineligible_label_rows": 6,
+          "n_warmup_rows": 17,
+          "params": {
+            "L": 18,
+            "batch_size": 64,
+            "dropout": 0.0,
+            "hidden_size": 64,
+            "huber_delta": 40.0,
+            "learning_rate": 0.001,
+            "loss": "huber",
+            "max_epochs": 50,
+            "num_layers": 1,
+            "optimizer": "adam",
+            "output_bias_init": "train_target_median",
+            "seed": 42,
+            "torch_num_threads": 4
+          },
+          "seed": 42,
+          "test_mae": 39.312917812101766,
+          "test_mape": 33.0171880808759,
+          "test_rmse": 84.18675349197441
+        },
+        {
+          "n_evaluated": {
+            "test": 3991,
+            "train": 13843,
+            "val": 1728
+          },
+          "n_ineligible_label_rows": 6,
+          "n_warmup_rows": 17,
+          "params": {
+            "L": 18,
+            "batch_size": 64,
+            "dropout": 0.0,
+            "hidden_size": 64,
+            "huber_delta": 40.0,
+            "learning_rate": 0.001,
+            "loss": "huber",
+            "max_epochs": 50,
+            "num_layers": 1,
+            "optimizer": "adam",
+            "output_bias_init": "train_target_median",
+            "seed": 43,
+            "torch_num_threads": 4
+          },
+          "seed": 43,
+          "test_mae": 38.093617080118804,
+          "test_mape": 31.34354019974563,
+          "test_rmse": 81.01687425755253
+        },
+        {
+          "n_evaluated": {
+            "test": 3991,
+            "train": 13843,
+            "val": 1728
+          },
+          "n_ineligible_label_rows": 6,
+          "n_warmup_rows": 17,
+          "params": {
+            "L": 18,
+            "batch_size": 64,
+            "dropout": 0.0,
+            "hidden_size": 64,
+            "huber_delta": 40.0,
+            "learning_rate": 0.001,
+            "loss": "huber",
+            "max_epochs": 50,
+            "num_layers": 1,
+            "optimizer": "adam",
+            "output_bias_init": "train_target_median",
+            "seed": 44,
+            "torch_num_threads": 4
+          },
+          "seed": 44,
+          "test_mae": 38.78766910129548,
+          "test_mape": 31.6390933671023,
+          "test_rmse": 85.22783867949794
+        }
+      ],
+      "summary": {
+        "test_mae": {
+          "mean": 38.731401331172016,
+          "std": 0.6115947311901458
+        },
+        "test_mape": {
+          "mean": 31.999940549241273,
+          "std": 0.893270577230767
+        },
+        "test_rmse": {
+          "mean": 83.47715547634162,
+          "std": 2.193331335791515
+        }
+      }
+    }
+  },
+  "protocol": {
+    "data_dir": "data/processed",
+    "horizons": [
+      6,
+      1
+    ],
+    "mape_threshold": 30.0,
+    "model_params": {
+      "L": 18,
+      "batch_size": 64,
+      "dropout": 0.0,
+      "hidden_size": 64,
+      "learning_rate": 0.001,
+      "loss": "huber",
+      "num_layers": 1,
+      "optimizer": "adam",
+      "output_bias_init": "train_target_median",
+      "torch_num_threads": 4
+    },
+    "reference_path": "tests/fixtures/golden_baselines.json",
+    "seeds": [
+      42,
+      43,
+      44
+    ],
+    "selected": {
+      "huber_delta": 40.0,
+      "max_epochs": 50
+    },
+    "tier1_factor": 0.99,
+    "tuning_results_path": "results/tuning_h6_validation.json"
+  },
+  "tier1": {
+    "factor": 0.99,
+    "per_seed": [
+      {
+        "mae_pass": true,
+        "pass": false,
+        "rmse_pass": false,
+        "seed": 42
+      },
+      {
+        "mae_pass": true,
+        "pass": false,
+        "rmse_pass": false,
+        "seed": 43
+      },
+      {
+        "mae_pass": true,
+        "pass": false,
+        "rmse_pass": false,
+        "seed": 44
+      }
+    ],
+    "shown": false,
+    "threshold_mae": 41.96740507216624,
+    "threshold_rmse": 79.81254922352697
+  },
+  "tier1_reference": {
+    "ref_mae": 42.39131825471337,
+    "ref_rmse": 80.61873658942119,
+    "threshold_mae": 41.96740507216624,
+    "threshold_rmse": 79.81254922352697
+  }
+}
