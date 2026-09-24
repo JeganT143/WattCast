@@ -340,3 +340,36 @@ in the module) check this. The isolation guarantee is about what is indexed and 
 Zero. No LSTM has been fitted or evaluated on the real validation or test partitions, and no test metric or test
 prediction has been computed for any LSTM. The measurement fits above used the train partition only; unit tests use
 synthetic data only.
+
+## Phase 4: runner test-isolation decision (Option 2), 2026-09-24
+
+Decided at HEAD d6351d7, before any runner or validation-only code exists. Supplements the pre-registration (f31c3aa); it
+does not modify it or the selection rule (a7cfb2f).
+
+### Decision
+The tuning runner is structurally validation-only: it receives train and validation data only, and has no code path that
+opens, loads, evaluates, or persists test data, test metrics, or test predictions.
+
+### Why
+The pre-registration requires that tuning never read, persist, log, or use test metrics or predictions. evaluate_forecaster
+computes train, val and test metrics on every call and needs all three partitions as input. Using it as-is (Option 1) would
+comply, but only by discipline: the runner would load test labels and hold test predictions in its result object. A
+structurally validation-only path lets a test demonstrate the rule instead of relying on it.
+
+### Conditions
+- The validation-only evaluation is a separate module (planned: src/evaluation/validation_only.py). harness.py is not modified.
+- Its scoring is tested for equivalence against the existing harness: on stub forecasters including one with required_history_length
+  greater than 0, and on the four Phase 3 baselines against the fixture's validation metrics and evaluated counts, under the
+  same two-tier bar as the golden test (counts exact; metrics exact except linear_regression at relative 1e-12).
+- The runner takes explicit train and validation file paths (no directory scan, no glob), so no test path is ever constructed.
+- An isolation test runs the runner where only train and validation files exist and requires it to complete. Grep gates check
+  that the runner and the validation-only module contain no test data path, no import of the harness, and no use of
+  mlflow_logger.
+
+### Accepted costs and limits
+- About ten lines of prediction logic are duplicated from the harness; the equivalence tests are the guard against drift.
+- This constrains the runner and its inputs. It does not prevent a different script from reading test data.
+- The final evaluation (once per seed, per the pre-registration) uses the full harness, deliberately.
+
+### Status
+No validation-only module or runner exists. Zero LSTM test evaluations to date.
