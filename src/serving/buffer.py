@@ -13,6 +13,7 @@ from src.serving.bundle import required_raw_history
 
 __all__ = [
     "required_raw_history",
+    "SEQUENCE_MODEL_RAW_HISTORY",
     "DuplicateTimestampError",
     "NonSuccessorTimestampError",
     "InsufficientHistoryError",
@@ -21,6 +22,26 @@ __all__ = [
 ]
 
 STEP = pd.Timedelta(minutes=10)
+
+# The production serving buffer's capacity. A sequence model (LSTM/GRU/
+# CNN-LSTM) consumes a window of L=18 consecutive feature rows
+# (required_history_length = L - 1 = 17 preceding rows, per
+# SequenceForecaster), and the OLDEST of those 18 feature rows itself
+# needs required_raw_history() raw rows to be finite (its own lag_144
+# lookback). So the raw span needed is required_history_length + raw
+# rows for one feature row = 17 + 145 = 162 (verified both algebraically
+# and empirically: 162 raw rows -> exactly one fully-finite L=18 window;
+# 161 -> zero). LR/RF only ever need required_raw_history() (145) for a
+# single feature row; the buffer is sized for the largest current
+# requirement across model families so any registered family can be
+# served from the same shared buffer.
+#
+# This is a hardcoded constant, not derived per-bundle: it assumes the
+# currently-registered sequence-model config (L=18). If a future
+# sequence model is ever registered with a different L, this constant
+# would need recomputing (required_history_length + required_raw_history()
+# for that L) — nothing here enforces that link automatically.
+SEQUENCE_MODEL_RAW_HISTORY = required_raw_history() + 17
 
 
 class DuplicateTimestampError(Exception):

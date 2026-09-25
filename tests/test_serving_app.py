@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 from src.serving.app import create_app
 from src.serving.bundle import ModelBundle
 from src.serving.buffer import (
+    SEQUENCE_MODEL_RAW_HISTORY,
     DuplicateTimestampError,
     InsufficientHistoryError,
     NonSuccessorTimestampError,
@@ -356,3 +357,15 @@ def test_serving_uses_no_torch_model_or_tensors():
     assert "no torch model, checkpoint, or tensor in the LR serving path" in result.stdout, (
         result.stdout + result.stderr
     )
+
+
+@pytest.mark.slow
+def test_real_champion_health_reports_new_buffer_capacity():
+    app = create_app()
+    with TestClient(app) as client:
+        health = client.get("/health").json()
+        assert health["required_raw_history"] == SEQUENCE_MODEL_RAW_HISTORY
+        assert health["have"] == SEQUENCE_MODEL_RAW_HISTORY
+        assert health["need"] == SEQUENCE_MODEL_RAW_HISTORY
+        assert health["ready"] is True
+        assert health["buffer_ready"] is True

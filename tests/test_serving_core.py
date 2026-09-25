@@ -11,8 +11,10 @@ from sklearn.preprocessing import StandardScaler
 
 from config.features import FEATURE_COLUMNS, SCALED_COLUMNS
 from config.paths import RAW_DATA_PATH
+from config.mlflow_config import TRACKING_URI
 from src.serving.bundle import ModelBundle
 from src.serving.buffer import (
+    SEQUENCE_MODEL_RAW_HISTORY,
     DuplicateTimestampError,
     InsufficientHistoryError,
     NonSuccessorTimestampError,
@@ -21,6 +23,7 @@ from src.serving.buffer import (
     seed_buffer,
 )
 from src.serving.features import serving_feature_row
+from src.serving.registry import load_champion
 from src.serving.service import ServingService
 
 SEED_END = pd.Timestamp("2016-04-29 23:50:00")
@@ -244,3 +247,67 @@ def test_predict_reflects_state_advanced_by_ingest(df_raw):
 
     assert first[0]["forecast_timestamp"] != second[0]["forecast_timestamp"]
     assert second[0]["origin_timestamp"] == FIRST_LIVE_TS + pd.Timedelta(minutes=10)
+
+
+def test_buffer_holds_sequence_model_capacity_and_evicts_oldest():
+    step = pd.Timedelta(minutes=10)
+    base = pd.Timestamp("2020-01-01 00:00:00")
+    buffer = RollingBuffer(SEQUENCE_MODEL_RAW_HISTORY)
+
+    for i in range(SEQUENCE_MODEL_RAW_HISTORY):
+        buffer.commit(base + i * step, float(i))
+
+    assert len(buffer) == SEQUENCE_MODEL_RAW_HISTORY
+    frame = buffer.committed_frame()
+    assert frame["date"].iloc[0] == base
+    assert frame["date"].iloc[-1] == base + (SEQUENCE_MODEL_RAW_HISTORY - 1) * step
+
+    buffer.commit(base + SEQUENCE_MODEL_RAW_HISTORY * step, float(SEQUENCE_MODEL_RAW_HISTORY))
+
+    assert len(buffer) == SEQUENCE_MODEL_RAW_HISTORY
+    frame_after = buffer.committed_frame()
+    assert frame_after["date"].iloc[0] == base + step
+    assert frame_after["date"].iloc[-1] == base + SEQUENCE_MODEL_RAW_HISTORY * step
+
+
+def test_seed_buffer_with_sequence_model_capacity(df_raw):
+    buffer = seed_buffer(df_raw, SEQUENCE_MODEL_RAW_HISTORY, SEED_END)
+
+    assert len(buffer) == SEQUENCE_MODEL_RAW_HISTORY
+    assert buffer.last_timestamp == SEED_END
+    assert buffer.is_ready
+
+    diffs = buffer.committed_frame()["date"].diff().dropna()
+    assert (diffs == pd.Timedelta(minutes=10)).all()
+
+
+def test_lr_predictions_bit_identical_at_different_buffer_capacities(df_raw):
+    champion = load_champion(TRACKING_URI)
+
+    pre = df_raw[df_raw["date"] < pd.Timestamp("2016-04-30")].sort_values("date").reset_index(drop=True)
+
+    small_capacity = required_raw_history()
+    large_capacity = SEQUENCE_MODEL_RAW_HISTORY
+    assert small_capacity != large_capacity
+
+    small_buffer = RollingBuffer(small_capacity)
+    for _, row in pre.tail(small_capacity).iterrows():
+        small_buffer.commit(row["date"], row["Appliances"])
+
+    large_buffer = RollingBuffer(large_capacity)
+    for _, row in pre.tail(large_capacity).iterrows():
+        large_buffer.commit(row["date"], row["Appliances"])
+
+    assert small_buffer.last_timestamp == large_buffer.last_timestamp == SEED_END
+
+    small_service = ServingService(champion, small_buffer)
+    large_service = ServingService(champion, large_buffer)
+
+    next_ts = SEED_END + pd.Timedelta(minutes=10)
+    small_service.ingest(next_ts, 60.0)
+    large_service.ingest(next_ts, 60.0)
+
+    small_result = small_service.predict(["linear_regression"])
+    large_result = large_service.predict(["linear_regression"])
+
+    assert small_result == large_result

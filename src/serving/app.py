@@ -24,10 +24,10 @@ from config.mlflow_config import TRACKING_URI
 from config.paths import RAW_DATA_PATH
 from src.serving.bundle import ModelBundle
 from src.serving.buffer import (
+    SEQUENCE_MODEL_RAW_HISTORY,
     DuplicateTimestampError,
     InsufficientHistoryError,
     NonSuccessorTimestampError,
-    required_raw_history,
     seed_buffer,
 )
 from src.serving.registry import CHAMPION_ALIAS, REGISTERED_MODEL_NAME, load_champion
@@ -54,7 +54,7 @@ def _default_load() -> ServingService:
     )
 
     raw = pd.read_csv(RAW_DATA_PATH, parse_dates=["date"])
-    buffer = seed_buffer(raw, required_raw_history(), bundle.schema["seed_end"])
+    buffer = seed_buffer(raw, SEQUENCE_MODEL_RAW_HISTORY, bundle.schema["seed_end"])
     return ServingService(bundle, buffer)
 
 
