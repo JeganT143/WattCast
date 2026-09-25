@@ -977,3 +977,27 @@ I therefore amend the equivalence floor **only for `roll6_std` and `roll18_std`*
 No other feature equivalence bar is changed. The prediction equivalence floor remains **`1e-10`**, and all lag, rolling-mean, and calendar-feature bars remain at their previously registered values.
 
 This amendment is not a preference change or a general relaxation of the equivalence standard. It is a scoped change made because implementation revealed a concrete numerical behavior that the original pre-registered feature bar did not accommodate. The original bar successfully served its purpose by detecting and exposing that behavior before the serving system was accepted.
+
+## Phase 6: serving dependency claim amendment, 2026-09-25
+
+**(student)**
+
+The original Phase 6 registration stated that the LR serving path would have no PyTorch import at startup and registered a startup assertion that `'torch' not in sys.modules`.
+
+Stage 6 implementation exposed a concrete contradiction in that claim. The import trace shows that importing `skops.io` invokes sklearn estimator discovery through `sklearn.utils.discovery.all_estimators()`, which walks installed sklearn submodules through `pkgutil.walk_packages`. In this environment, that discovery reaches `sklearn.externals.array_api_compat.torch` and imports the real `torch` module as a transitive side effect.
+
+The existing `src.tracking.mlflow_logger` already uses the project's established skops trusted-types configuration. The inspected source shows `_SKOPS_TRUSTED_TYPES` and `skops_trusted_types`, but no project-level `import torch` or explicit `all_estimators()` call. Therefore this is a transitive behavior of the skops/sklearn dependency path rather than an import performed by WattCast's LR serving logic.
+
+I choose Option A: narrow the claim rather than change the serialization convention. The existing skops bundle is already part of the committed MLflow/model workflow, and changing the serialization mechanism or introducing a separate trusted-type discovery convention would add complexity without addressing a serving correctness problem.
+
+The revised claim is:
+
+The LR serving application logic does not require PyTorch for model inference, does not instantiate a PyTorch model, does not load a PyTorch checkpoint, and does not perform tensor/GPU operations. However, the current skops/sklearn artifact-loading dependency path may import `torch` transitively during library initialization in this environment.
+
+Therefore the literal startup assertion `'torch' not in sys.modules` is withdrawn. It will be replaced by tests that verify the properties relevant to the actual serving design: the LR artifact loads as the registered LR/`Forecaster` model, no `.pt` or `.pth` model is loaded, no `torch.nn.Module` is instantiated, and no PyTorch tensor/GPU operation is performed by the serving startup or prediction path.
+
+This amendment does not change the model, bundle format, MLflow registration, feature pipeline, equivalence bars, or prediction path. The Stage 5 equivalence results remain unaffected: the amended `roll6_std` and `roll18_std` bars pass, all other feature bars pass, and the prediction bar remains unchanged.
+
+The Stage 6 application tests otherwise passed 8/10 before this dependency claim was encountered. The remaining NaN JSON-serialization failure is a separate test-side issue and remains to be fixed. This amendment addresses only the genuine transitive-import failure.
+
+The operational rationale for LR also remains unchanged: the serving artifact is a simple linear model with the existing bundle/scaler/schema boundary. This amendment specifically removes an inaccurate claim about the absence of the `torch` module from the Python process; it does not establish that PyTorch is part of the LR model's inference computation.
