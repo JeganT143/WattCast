@@ -44,7 +44,7 @@ class PredictRequest(BaseModel):
 
 
 def _default_load() -> ServingService:
-    bundle = load_champion(TRACKING_URI)
+    bundle = load_champion(TRACKING_URI, family="linear_regression")
     client = MlflowClient(tracking_uri=TRACKING_URI)
     model_version = client.get_model_version_by_alias(REGISTERED_MODEL_NAME, CHAMPION_ALIAS).version
     bundle = ModelBundle(

@@ -60,7 +60,7 @@ def _measure_startup(n_runs: int = 5) -> list[float]:
     times = []
     for _ in range(n_runs):
         t0 = time.perf_counter()
-        bundle = load_champion(TRACKING_URI)
+        bundle = load_champion(TRACKING_URI, family="linear_regression")
         raw = pd.read_csv(RAW_DATA_PATH, parse_dates=["date"])
         buffer = seed_buffer(raw, required_raw_history(), bundle.schema["seed_end"])
         ServingService(bundle, buffer)
@@ -70,7 +70,7 @@ def _measure_startup(n_runs: int = 5) -> list[float]:
 
 
 def _build_service() -> ServingService:
-    bundle = load_champion(TRACKING_URI)
+    bundle = load_champion(TRACKING_URI, family="linear_regression")
     raw = pd.read_csv(RAW_DATA_PATH, parse_dates=["date"])
     buffer = seed_buffer(raw, required_raw_history(), bundle.schema["seed_end"])
     return ServingService(bundle, buffer)

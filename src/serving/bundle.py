@@ -24,7 +24,7 @@ from sklearn.preprocessing import StandardScaler
 
 from config.features import FEATURE_COLUMNS, LAG_STEPS, ROLLING_WINDOWS, SCALED_COLUMNS
 from src.models.forecaster import Forecaster
-from src.models.sklearn_models import LinearRegressionForecaster
+from src.models.sklearn_models import LinearRegressionForecaster, RandomForestForecaster
 
 
 def required_raw_history(
@@ -56,13 +56,27 @@ def _dump_skops(obj, path: Path) -> None:
     sio.dump(obj, path)
 
 
-def _load_skops_trusted(path: Path):
+# Scoped, explicit trust per model family — matching the convention
+# already established in src/tracking/mlflow_logger.py: skops flags
+# sklearn.tree._tree.Tree by default for tree-based models (a malicious
+# file could set out-of-bounds node indices), which is not a concern for
+# models this project trains and saves itself. Trust is scoped to exactly
+# the flagged type per family, never a blanket override.
+_SKOPS_TRUSTED_TYPES: dict[str, list[str]] = {
+    "linear_regression": [],
+    "random_forest": ["sklearn.tree._tree.Tree"],
+}
+
+
+def _load_skops_trusted(path: Path, trusted: list[str] | None = None):
+    trusted = trusted or []
     untrusted = sio.get_untrusted_types(file=path)
-    if untrusted:
+    unexpected = [t for t in untrusted if t not in trusted]
+    if unexpected:
         raise ValueError(
-            f"skops file {path} contains untrusted types not explicitly reviewed: {untrusted}"
+            f"skops file {path} contains untrusted types not explicitly reviewed: {unexpected}"
         )
-    return sio.load(path, trusted=[])
+    return sio.load(path, trusted=trusted)
 
 
 def save_bundle(bundle: ModelBundle, directory: Path) -> None:
@@ -75,14 +89,30 @@ def save_bundle(bundle: ModelBundle, directory: Path) -> None:
 
 
 def _load_linear_regression(directory: Path, schema: dict) -> Forecaster:
-    estimator = _load_skops_trusted(directory / "estimator.skops")
+    estimator = _load_skops_trusted(
+        directory / "estimator.skops", trusted=_SKOPS_TRUSTED_TYPES["linear_regression"]
+    )
     forecaster = LinearRegressionForecaster(fit_intercept=bool(estimator.fit_intercept))
+    forecaster.model = estimator
+    return forecaster
+
+
+def _load_random_forest(directory: Path, schema: dict) -> Forecaster:
+    estimator = _load_skops_trusted(
+        directory / "estimator.skops", trusted=_SKOPS_TRUSTED_TYPES["random_forest"]
+    )
+    forecaster = RandomForestForecaster(
+        n_estimators=estimator.n_estimators,
+        max_depth=estimator.max_depth,
+        random_state=estimator.random_state,
+    )
     forecaster.model = estimator
     return forecaster
 
 
 LOADERS: dict[str, Callable[[Path, dict], Forecaster]] = {
     "linear_regression": _load_linear_regression,
+    "random_forest": _load_random_forest,
 }
 
 

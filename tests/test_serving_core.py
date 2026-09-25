@@ -282,7 +282,7 @@ def test_seed_buffer_with_sequence_model_capacity(df_raw):
 
 
 def test_lr_predictions_bit_identical_at_different_buffer_capacities(df_raw):
-    champion = load_champion(TRACKING_URI)
+    champion = load_champion(TRACKING_URI, family="linear_regression")
 
     pre = df_raw[df_raw["date"] < pd.Timestamp("2016-04-30")].sort_values("date").reset_index(drop=True)
 

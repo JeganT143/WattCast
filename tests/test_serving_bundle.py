@@ -118,7 +118,7 @@ def test_register_bundle_then_load_champion(tmp_path):
     assert isinstance(run_id, str) and run_id
     assert version == 1
 
-    champion = load_champion(tracking_uri)
+    champion = load_champion(tracking_uri, family="linear_regression")
 
     n_cols = len(FEATURE_COLUMNS)
     X = _fixed_X(n_cols)

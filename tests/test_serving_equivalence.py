@@ -82,7 +82,7 @@ def test_feature_and_prediction_equivalence():
 
     df_features_offline = build_features(pre, target_horizons=TARGET_HORIZONS)
 
-    champion = load_champion(TRACKING_URI)
+    champion = load_champion(TRACKING_URI, family="linear_regression")
     capacity = required_raw_history()
 
     positions = _selected_positions(len(df_features_offline))
