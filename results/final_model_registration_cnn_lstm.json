@@ -1,0 +1,14 @@
+{
+  "code_sha": "109dc32fc3ff22f167c4afac8b6015e50c8e472d",
+  "epochs": 50,
+  "model_family": "cnn_lstm",
+  "model_version": 1,
+  "n_fittable": 15588,
+  "n_lag144_finite": 15594,
+  "n_mask_rows": 15738,
+  "run_id": "0244bbdd69c049118f4a36d757b27500",
+  "seed": 42,
+  "tracking_store_path": "db/mlflow.db",
+  "train_end": "2016-04-29 23:50:00",
+  "train_start": "2016-01-12 17:00:00"
+}
