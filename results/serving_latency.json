@@ -1,0 +1,46 @@
+{
+  "code_sha": "9a51a7bed1ab62217acd532ea73aa84b1414c392",
+  "core_predict_ms": {
+    "max": 45.35180400034733,
+    "mean": 18.634745007989295,
+    "n": 1000,
+    "p50": 18.332414499582228,
+    "p95": 20.78420235006888,
+    "p99": 21.455817149371796
+  },
+  "cpu_count": 12,
+  "http_predict_ms": {
+    "max": 132.98383500023192,
+    "mean": 22.163339258002452,
+    "n": 500,
+    "p50": 21.28235299960579,
+    "p95": 26.968456949953175,
+    "p99": 33.019873459916184
+  },
+  "model_version": 1,
+  "package_versions": {
+    "fastapi": "0.141.1",
+    "httpx": "0.28.1",
+    "mlflow": "3.16.1",
+    "numpy": "2.5.3",
+    "pandas": "3.0.6",
+    "scikit-learn": "1.9.1",
+    "uvicorn": "0.53.0"
+  },
+  "python_version": "3.14.4 (main, Aug 20 2026, 10:41:58) [GCC 15.2.0]",
+  "run_id": "0681fa97b2594127870c58cb6ee0abaa",
+  "startup_ms": {
+    "max": 190.43940099982137,
+    "mean": 150.36284339985286,
+    "runs": [
+      190.43940099982137,
+      143.3031979995576,
+      137.34356799977832,
+      140.74218299992935,
+      139.98586700017768
+    ]
+  },
+  "synthetic_data": true,
+  "synthetic_data_note": "All predict() calls used synthetic timestamps (2016-04-30 00:00 onward, 10-minute grid) and synthetic Appliances values; no row with date >= 2016-04-30 was read or compared.",
+  "timestamp_of_measurement": "2026-09-25T02:26:48.894085+00:00"
+}
