@@ -1,5 +1,5 @@
 """Pure expanding-window fold generator for the registered Phase 5 walk-forward
-scheme (DECISIONS.md, "Phase 5: walk-forward comparison rule (pre-registration)").
+scheme (decisions.md, ADR-009).
 
 No I/O, no mutation of the input, and no label purge — the harness applies
 mask_ineligible_labels separately."""

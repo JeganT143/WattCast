@@ -1,6 +1,5 @@
 """Per-fold train-only scaling and label purge for the registered Phase 5
-walk-forward scheme (DECISIONS.md, "Phase 5: walk-forward comparison rule
-(pre-registration)" and "Phase 5: measured fold table").
+walk-forward scheme (decisions.md, ADR-009).
 
 Composed entirely from the existing pipeline pieces (fit_scaler,
 transform_with_scaler, build_horizon_dataset, mask_ineligible_labels) —

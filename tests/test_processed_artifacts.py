@@ -25,7 +25,7 @@ def _forecasters(h):
 def test_processed_csv_has_required_columns(split, h):
     path = PROCESSED / f"{split}_t{h}.csv"
     if not path.exists():
-        pytest.skip(f"{path} not found; run `dvc pull` to fetch processed artifacts")
+        pytest.skip(f"{path} not found; run `make data`")
 
     columns = set(pd.read_csv(path, nrows=0).columns)
     assert f"target_t{h}" in columns

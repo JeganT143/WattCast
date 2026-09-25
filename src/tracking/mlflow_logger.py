@@ -27,9 +27,10 @@ _PARTITIONS = ("train", "val", "test")
 # Model-internal types explicitly trusted for skops (de)serialization.
 # Every model logged by this project is self-trained from our own
 # pipeline on our own data — never loaded from an external/untrusted
-# source — so this trust boundary is justified. If Phase 6's FastAPI
-# serving layer is ever changed to load models from anywhere other
-# than our own MLflow registry, this trust boundary must be revisited.
+# source — so this trust boundary is justified. Serving loads the same
+# kind of self-produced artifacts from the committed models/ directory
+# (decisions.md, ADR-011 and ADR-016), so changes to models/ need the
+# same review as code changes.
 #
 # sklearn.tree._tree.Tree: the shared node storage for tree-based
 # models (DecisionTree*, RandomForest*, ExtraTrees*, GradientBoosting*).

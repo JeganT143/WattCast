@@ -1,6 +1,5 @@
 """Serving-time feature row builder — runs the same canonical build_features
-sequence used offline, never a reimplementation (DECISIONS.md "Phase 6:
-serving registration, 2026-09-25", section 4).
+sequence used offline, never a reimplementation (decisions.md, ADR-014).
 """
 
 import numpy as np

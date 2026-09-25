@@ -1,4 +1,1 @@
-[core]
-    remote = local
-['remote "local"']
-    url = /home/jegan/data/dvc/wattcast
+

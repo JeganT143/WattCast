@@ -4,6 +4,8 @@ import pytest
 
 from tests.golden import FIXTURE_PATH, compute
 
+pytestmark = pytest.mark.requires_processed_data
+
 # linear_regression's predict() is a BLAS matrix-vector product. The harness now builds its input with
 # np.concatenate (C-contiguous) where the old code passed DataFrame.to_numpy() (F-contiguous): identical values,
 # different summation order, measured ~1-ulp metric differences. Every other model must stay bit-identical.

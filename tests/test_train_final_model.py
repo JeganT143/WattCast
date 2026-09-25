@@ -1,6 +1,6 @@
 """Tests for scripts/train_final_model.py, the generalized (multi-family)
-successor to scripts/train_final_lr.py (DECISIONS.md "Phase 6: serving
-registration, 2026-09-25"). linear_regression is excluded here — it is
+successor to scripts/train_final_lr.py (decisions.md,
+ADR-012). linear_regression is excluded here — it is
 already registered via the original script. random_forest, lstm, gru, and
 cnn_lstm are all supported in this stage.
 """
@@ -85,6 +85,7 @@ def test_refuses_when_results_file_already_exists(tmp_path):
         )
 
 
+@pytest.mark.requires_registry
 def test_load_champion_linear_regression_unaffected_by_signature_change():
     """Critical regression check for the registry.py signature change: the
     new function-based load_champion(family=...) must resolve to the exact

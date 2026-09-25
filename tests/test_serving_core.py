@@ -1,6 +1,8 @@
 """Tests for the pure, framework-free serving core: rolling buffer,
-serving feature builder, and ServingService (DECISIONS.md "Phase 6:
-serving registration, 2026-09-25", sections 3-4)."""
+serving feature builder, and ServingService (decisions.md, ADR-014).
+
+Real-data tests use the committed pre-test seed history and the committed
+model bundles in models/, so they run without the raw dataset or MLflow."""
 
 import threading
 
@@ -10,9 +12,8 @@ import pytest
 from sklearn.preprocessing import StandardScaler
 
 from config.features import FEATURE_COLUMNS, SCALED_COLUMNS
-from config.paths import RAW_DATA_PATH
-from config.mlflow_config import TRACKING_URI
-from src.serving.bundle import ModelBundle
+from config.paths import MODELS_DIR, SEED_HISTORY_PATH
+from src.serving.bundle import ModelBundle, load_bundle
 from src.serving.buffer import (
     SEQUENCE_MODEL_RAW_HISTORY,
     DuplicateTimestampError,
@@ -23,7 +24,6 @@ from src.serving.buffer import (
     seed_buffer,
 )
 from src.serving.features import serving_feature_row
-from src.serving.registry import load_champion
 from src.serving.service import ServingService
 
 SEED_END = pd.Timestamp("2016-04-29 23:50:00")
@@ -31,8 +31,8 @@ FIRST_LIVE_TS = pd.Timestamp("2016-04-30 00:00:00")
 
 
 @pytest.fixture(scope="module")
-def df_raw():
-    return pd.read_csv(RAW_DATA_PATH, parse_dates=["date"])
+def history():
+    return pd.read_csv(SEED_HISTORY_PATH, parse_dates=["date"])
 
 
 class _StubForecaster:
@@ -78,56 +78,56 @@ def test_required_raw_history_changes_with_inputs():
     assert required_raw_history(lag_steps=[1, 2], rolling_windows=[3]) == 4
 
 
-def test_seed_buffer_real_history(df_raw):
+def test_seed_buffer_real_history(history):
     capacity = required_raw_history()
-    buffer = seed_buffer(df_raw, capacity, SEED_END)
+    buffer = seed_buffer(history, capacity, SEED_END)
 
     assert len(buffer) == capacity
     assert buffer.last_timestamp == SEED_END
     assert buffer.is_ready
 
 
-def test_seed_buffer_rejects_wrong_seed_end(df_raw):
+def test_seed_buffer_rejects_wrong_seed_end(history):
     capacity = required_raw_history()
     with pytest.raises(ValueError):
-        seed_buffer(df_raw, capacity, SEED_END - pd.Timedelta(minutes=10))
+        seed_buffer(history, capacity, SEED_END - pd.Timedelta(minutes=10))
 
 
-def test_seed_buffer_insufficient_history_raises(df_raw):
+def test_seed_buffer_insufficient_history_raises(history):
     with pytest.raises(InsufficientHistoryError):
-        seed_buffer(df_raw, capacity=100000, seed_end=SEED_END)
+        seed_buffer(history, capacity=100000, seed_end=SEED_END)
 
 
-def test_first_accepted_timestamp_after_seed(df_raw):
+def test_first_accepted_timestamp_after_seed(history):
     capacity = required_raw_history()
-    buffer = seed_buffer(df_raw, capacity, SEED_END)
+    buffer = seed_buffer(history, capacity, SEED_END)
     buffer.check_next(FIRST_LIVE_TS)  # must not raise
 
 
-def test_duplicate_timestamp_rejected(df_raw):
+def test_duplicate_timestamp_rejected(history):
     capacity = required_raw_history()
-    buffer = seed_buffer(df_raw, capacity, SEED_END)
+    buffer = seed_buffer(history, capacity, SEED_END)
     with pytest.raises(DuplicateTimestampError):
         buffer.check_next(SEED_END)
 
 
-def test_non_successor_timestamp_rejected_gap(df_raw):
+def test_non_successor_timestamp_rejected_gap(history):
     capacity = required_raw_history()
-    buffer = seed_buffer(df_raw, capacity, SEED_END)
+    buffer = seed_buffer(history, capacity, SEED_END)
     with pytest.raises(NonSuccessorTimestampError):
         buffer.check_next(SEED_END + pd.Timedelta(minutes=20))
 
 
-def test_non_successor_timestamp_rejected_earlier(df_raw):
+def test_non_successor_timestamp_rejected_earlier(history):
     capacity = required_raw_history()
-    buffer = seed_buffer(df_raw, capacity, SEED_END)
+    buffer = seed_buffer(history, capacity, SEED_END)
     with pytest.raises(NonSuccessorTimestampError):
         buffer.check_next(SEED_END - pd.Timedelta(minutes=10))
 
 
-def test_short_buffer_insufficient_history(df_raw):
+def test_short_buffer_insufficient_history(history):
     capacity = required_raw_history()
-    pre = df_raw[df_raw["date"] < pd.Timestamp("2016-04-30")].sort_values("date")
+    pre = history[history["date"] < pd.Timestamp("2016-04-30")].sort_values("date")
     short_tail = pre.tail(100)
 
     buffer = RollingBuffer(capacity)
@@ -140,8 +140,8 @@ def test_short_buffer_insufficient_history(df_raw):
         service.predict(["linear_regression"])
 
 
-def test_serving_feature_row_columns(df_raw):
-    pre = df_raw[df_raw["date"] < pd.Timestamp("2016-04-30")].sort_values("date")
+def test_serving_feature_row_columns(history):
+    pre = history[history["date"] < pd.Timestamp("2016-04-30")].sort_values("date")
     row = serving_feature_row(pre.tail(200))
 
     assert list(row.index) == FEATURE_COLUMNS
@@ -149,9 +149,9 @@ def test_serving_feature_row_columns(df_raw):
     assert "Appliances_lag_143" not in row.index
 
 
-def test_predict_forecast_timestamp_is_origin_plus_60min(df_raw):
+def test_predict_forecast_timestamp_is_origin_plus_60min(history):
     capacity = required_raw_history()
-    buffer = seed_buffer(df_raw, capacity, SEED_END)
+    buffer = seed_buffer(history, capacity, SEED_END)
     service = ServingService(_fake_bundle(horizon=6), buffer)
 
     service.ingest(FIRST_LIVE_TS, 60.0)
@@ -161,9 +161,9 @@ def test_predict_forecast_timestamp_is_origin_plus_60min(df_raw):
     assert results[0]["forecast_timestamp"] == FIRST_LIVE_TS + pd.Timedelta(minutes=60)
 
 
-def test_failed_predict_leaves_buffer_unchanged_and_is_retryable(df_raw):
+def test_failed_predict_leaves_buffer_unchanged_and_is_retryable(history):
     capacity = required_raw_history()
-    buffer = seed_buffer(df_raw, capacity, SEED_END)
+    buffer = seed_buffer(history, capacity, SEED_END)
     forecaster = _StubForecaster(raise_on_predict=True)
     service = ServingService(_fake_bundle(forecaster=forecaster), buffer)
 
@@ -183,9 +183,9 @@ def test_failed_predict_leaves_buffer_unchanged_and_is_retryable(df_raw):
     assert buffer.last_timestamp == FIRST_LIVE_TS
 
 
-def test_concurrent_same_timestamp_ingest_yields_one_success(df_raw):
+def test_concurrent_same_timestamp_ingest_yields_one_success(history):
     capacity = required_raw_history()
-    buffer = seed_buffer(df_raw, capacity, SEED_END)
+    buffer = seed_buffer(history, capacity, SEED_END)
     service = ServingService(_fake_bundle(), buffer)
 
     successes = []
@@ -208,9 +208,9 @@ def test_concurrent_same_timestamp_ingest_yields_one_success(df_raw):
     assert len(errors) == 1
 
 
-def test_predict_called_twice_without_ingest_is_bit_identical(df_raw):
+def test_predict_called_twice_without_ingest_is_bit_identical(history):
     capacity = required_raw_history()
-    buffer = seed_buffer(df_raw, capacity, SEED_END)
+    buffer = seed_buffer(history, capacity, SEED_END)
     service = ServingService(_fake_bundle(horizon=6), buffer)
 
     service.ingest(FIRST_LIVE_TS, 60.0)
@@ -220,9 +220,9 @@ def test_predict_called_twice_without_ingest_is_bit_identical(df_raw):
     assert first == second
 
 
-def test_predict_does_not_mutate_buffer_state(df_raw):
+def test_predict_does_not_mutate_buffer_state(history):
     capacity = required_raw_history()
-    buffer = seed_buffer(df_raw, capacity, SEED_END)
+    buffer = seed_buffer(history, capacity, SEED_END)
     service = ServingService(_fake_bundle(horizon=6), buffer)
 
     service.ingest(FIRST_LIVE_TS, 60.0)
@@ -238,9 +238,9 @@ def test_predict_does_not_mutate_buffer_state(df_raw):
     assert len(buffer) == len_before
 
 
-def test_predict_reflects_state_advanced_by_ingest(df_raw):
+def test_predict_reflects_state_advanced_by_ingest(history):
     capacity = required_raw_history()
-    buffer = seed_buffer(df_raw, capacity, SEED_END)
+    buffer = seed_buffer(history, capacity, SEED_END)
     service = ServingService(_fake_bundle(horizon=6), buffer)
 
     service.ingest(FIRST_LIVE_TS, 60.0)
@@ -274,8 +274,8 @@ def test_buffer_holds_sequence_model_capacity_and_evicts_oldest():
     assert frame_after["date"].iloc[-1] == base + SEQUENCE_MODEL_RAW_HISTORY * step
 
 
-def test_seed_buffer_with_sequence_model_capacity(df_raw):
-    buffer = seed_buffer(df_raw, SEQUENCE_MODEL_RAW_HISTORY, SEED_END)
+def test_seed_buffer_with_sequence_model_capacity(history):
+    buffer = seed_buffer(history, SEQUENCE_MODEL_RAW_HISTORY, SEED_END)
 
     assert len(buffer) == SEQUENCE_MODEL_RAW_HISTORY
     assert buffer.last_timestamp == SEED_END
@@ -285,10 +285,10 @@ def test_seed_buffer_with_sequence_model_capacity(df_raw):
     assert (diffs == pd.Timedelta(minutes=10)).all()
 
 
-def test_lr_predictions_bit_identical_at_different_buffer_capacities(df_raw):
-    champion = load_champion(TRACKING_URI, family="linear_regression")
+def test_lr_predictions_bit_identical_at_different_buffer_capacities(history):
+    champion = load_bundle(MODELS_DIR / "linear_regression")
 
-    pre = df_raw[df_raw["date"] < pd.Timestamp("2016-04-30")].sort_values("date").reset_index(drop=True)
+    pre = history[history["date"] < pd.Timestamp("2016-04-30")].sort_values("date").reset_index(drop=True)
 
     small_capacity = required_raw_history()
     large_capacity = SEQUENCE_MODEL_RAW_HISTORY
@@ -317,17 +317,17 @@ def test_lr_predictions_bit_identical_at_different_buffer_capacities(df_raw):
     assert small_result == large_result
 
 
-def test_service_with_only_default_bundle_reports_single_available_family(df_raw):
+def test_service_with_only_default_bundle_reports_single_available_family(history):
     capacity = required_raw_history()
-    buffer = seed_buffer(df_raw, capacity, SEED_END)
+    buffer = seed_buffer(history, capacity, SEED_END)
     service = ServingService(_fake_bundle(), buffer)
 
     assert service.available_families == ["linear_regression"]
 
 
-def test_service_accepts_extra_bundles_and_resolves_all_of_them(df_raw):
+def test_service_accepts_extra_bundles_and_resolves_all_of_them(history):
     capacity = required_raw_history()
-    buffer = seed_buffer(df_raw, capacity, SEED_END)
+    buffer = seed_buffer(history, capacity, SEED_END)
 
     rf_bundle = _fake_bundle(forecaster=_StubForecaster(value=99.0))
     rf_bundle = ModelBundle(
@@ -357,27 +357,27 @@ def test_service_accepts_extra_bundles_and_resolves_all_of_them(df_raw):
 # and silently return NaN when given a single row) ---
 
 
-def _real_five_family_service(df_raw):
+def _real_five_family_service(history):
     capacity = SEQUENCE_MODEL_RAW_HISTORY
-    buffer = seed_buffer(df_raw, capacity, SEED_END)
-    primary = load_champion(TRACKING_URI, family="linear_regression")
+    buffer = seed_buffer(history, capacity, SEED_END)
+    primary = load_bundle(MODELS_DIR / "linear_regression")
     extra = [
-        load_champion(TRACKING_URI, family=family)
+        load_bundle(MODELS_DIR / family)
         for family in ("random_forest", "lstm", "gru", "cnn_lstm")
     ]
     return ServingService(primary, buffer, extra_bundles=extra)
 
 
-def test_lr_random_forest_predict_unchanged_by_sequence_windowing_fix(df_raw):
+def test_lr_random_forest_predict_unchanged_by_sequence_windowing_fix(history):
     """(a) Regression guard: the existing single-row LR/RF path must be
     byte-for-byte unchanged by the sequence-model windowing fix. Reconstructs
     the exact scenario test_lr_predictions_bit_identical_at_different_buffer_capacities
     already exercises (real champion, real pre-boundary history, real ingest),
     at the (larger) 5-family buffer capacity, and asserts against fixed values
     captured from the real champion before this fix."""
-    champion = load_champion(TRACKING_URI, family="linear_regression")
+    champion = load_bundle(MODELS_DIR / "linear_regression")
     capacity = SEQUENCE_MODEL_RAW_HISTORY
-    buffer = seed_buffer(df_raw, capacity, SEED_END)
+    buffer = seed_buffer(history, capacity, SEED_END)
     service = ServingService(champion, buffer)
 
     service.ingest(FIRST_LIVE_TS, 60.0)
@@ -393,11 +393,11 @@ def test_lr_random_forest_predict_unchanged_by_sequence_windowing_fix(df_raw):
     assert repeat == result
 
 
-def test_sequence_family_lstm_predict_is_finite(df_raw):
+def test_sequence_family_lstm_predict_is_finite(history):
     """(b) The exact scenario that used to raise ValueError("forecaster
     returned an invalid prediction") for lstm against a properly-seeded
     162-row buffer."""
-    service = _real_five_family_service(df_raw)
+    service = _real_five_family_service(history)
     service.ingest(FIRST_LIVE_TS, 60.0)
     result = service.predict(["lstm"])[0]
 
@@ -405,9 +405,9 @@ def test_sequence_family_lstm_predict_is_finite(df_raw):
     assert np.isfinite(result["prediction_wh"])
 
 
-def test_sequence_family_gru_predict_is_finite(df_raw):
+def test_sequence_family_gru_predict_is_finite(history):
     """(c) Same as above, gru, verified independently."""
-    service = _real_five_family_service(df_raw)
+    service = _real_five_family_service(history)
     service.ingest(FIRST_LIVE_TS, 60.0)
     result = service.predict(["gru"])[0]
 
@@ -415,9 +415,9 @@ def test_sequence_family_gru_predict_is_finite(df_raw):
     assert np.isfinite(result["prediction_wh"])
 
 
-def test_sequence_family_cnn_lstm_predict_is_finite(df_raw):
+def test_sequence_family_cnn_lstm_predict_is_finite(history):
     """(c) Same as above, cnn_lstm, verified independently."""
-    service = _real_five_family_service(df_raw)
+    service = _real_five_family_service(history)
     service.ingest(FIRST_LIVE_TS, 60.0)
     result = service.predict(["cnn_lstm"])[0]
 
@@ -425,13 +425,13 @@ def test_sequence_family_cnn_lstm_predict_is_finite(df_raw):
     assert np.isfinite(result["prediction_wh"])
 
 
-def test_all_five_families_predicted_together_all_finite_no_errors(df_raw):
+def test_all_five_families_predicted_together_all_finite_no_errors(history):
     """(d) The exact scenario that produced the live 500: all five families
     requested together in one predict() call. Before the fix this raises
     ValueError (lstm/gru/cnn_lstm's single-row X windows to nothing, so
     predict() returns NaN, tripping the isfinite guard) — reproduced here as
     a failing test first."""
-    service = _real_five_family_service(df_raw)
+    service = _real_five_family_service(history)
     service.ingest(FIRST_LIVE_TS, 60.0)
 
     results = service.predict(
@@ -447,7 +447,7 @@ def test_all_five_families_predicted_together_all_finite_no_errors(df_raw):
     assert forecast_timestamps == {FIRST_LIVE_TS + pd.Timedelta(minutes=60)}
 
 
-def test_sequence_family_prediction_matches_direct_offline_computation(df_raw):
+def test_sequence_family_prediction_matches_direct_offline_computation(history):
     """(e) Equivalence check specific to this fix: the sequence-family
     prediction ServingService.predict() produces must match what you get by
     directly reusing the canonical pipeline outside of ServingService —
@@ -472,13 +472,13 @@ def test_sequence_family_prediction_matches_direct_offline_computation(df_raw):
     from src.preprocessing.scaling import transform_with_scaler
     from src.serving.features import serving_feature_frame
 
-    champion = load_champion(TRACKING_URI, family="lstm")
+    champion = load_bundle(MODELS_DIR / "lstm")
 
     capacity = SEQUENCE_MODEL_RAW_HISTORY
-    pre = df_raw[df_raw["date"] < pd.Timestamp("2016-04-30")].sort_values("date").reset_index(drop=True)
+    pre = history[history["date"] < pd.Timestamp("2016-04-30")].sort_values("date").reset_index(drop=True)
     tail = pre.tail(capacity).reset_index(drop=True)
 
-    buffer = seed_buffer(df_raw, capacity, SEED_END)
+    buffer = seed_buffer(history, capacity, SEED_END)
     service = ServingService(champion, buffer)
     service.ingest(FIRST_LIVE_TS, 60.0)
     via_service = service.predict(["lstm"])[0]["prediction_wh"]

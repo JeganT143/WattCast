@@ -1,3 +1,9 @@
+> **Archived research log.** This is the original chronological, append-only record kept while the
+> project was built (formerly `DECISIONS.md`). Entries are dated, some were committed *before* the
+> experiments they govern (pre-registrations), and they cite commit SHAs; it is preserved verbatim as
+> the evidence behind the curated summary in [`decisions.md`](../decisions.md). Notebooks and older
+> commits refer to it as `DECISIONS.md`.
+
 # WattCast — Phases 0–2 Summary
 
 ## Phase 0 — MLOps Foundation

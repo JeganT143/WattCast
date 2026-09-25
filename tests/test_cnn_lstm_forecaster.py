@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pytest
 import torch
 
 from src.evaluation.validation_only import evaluate_on_validation
@@ -136,6 +137,7 @@ def test_g_causality_non_vacuous():
     assert not np.array_equal(pred0[40:], pred1[40:])
 
 
+@pytest.mark.requires_processed_data
 def test_h_real_data_smoke_validation_only():
     train_df = pd.read_csv("data/processed/train_t6.csv", parse_dates=["date"])
     val_df = pd.read_csv("data/processed/val_t6.csv", parse_dates=["date"])

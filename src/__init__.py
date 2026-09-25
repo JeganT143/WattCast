@@ -1,1 +1,1 @@
-"""WattCast source package — data pipeline, feature engineering, models, evaluation, and MLflow tracking."""
+"""WattCast source package: data pipeline, features, models, evaluation, tuning, training, tracking and serving."""

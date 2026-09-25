@@ -24,6 +24,7 @@ def _fixture_or_skip():
     return fixture
 
 
+@pytest.mark.requires_processed_data
 def test_a_exact_reproduction():
     fixture = _fixture_or_skip()
     for config, expected_run in zip(CONFIGS, fixture["runs"]):
@@ -39,6 +40,7 @@ def test_b_runs_differ_by_seed():
     assert run0["predictions_sha256"] != run1["predictions_sha256"]
 
 
+@pytest.mark.requires_processed_data
 def test_c_perturbation_detected():
     fixture = _fixture_or_skip()
     baseline = fixture["runs"][0]

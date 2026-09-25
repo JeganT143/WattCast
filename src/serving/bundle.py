@@ -1,11 +1,12 @@
 """Serving model bundle: a fitted forecaster, its scaler, and the schema
 that pins the feature contract they were trained against
-(DECISIONS.md "Phase 6: serving registration, 2026-09-25").
+(decisions.md, ADR-011 and ADR-016).
 
-Serialization uses skops, the same convention as the existing MLflow
-logger (src/tracking/mlflow_logger.py): no pickle, and any untrusted
-type surfaced by skops on load must be checked explicitly rather than
-blanket-trusted.
+On disk a bundle is one directory: schema.json, scaler.skops, and either
+estimator.skops (sklearn families) or model_state.pt (PyTorch families).
+Serialization never uses pickle: sklearn objects go through skops, and any
+untrusted type skops reports on load must be explicitly allow-listed per
+family rather than blanket-trusted.
 
 required_raw_history lives here (not in src/serving/buffer.py, which
 needs it too) because the bundle schema must be able to record it at
@@ -16,6 +17,7 @@ buffer.py imports it from here rather than redefining it.
 import hashlib
 import inspect
 import json
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -80,7 +82,9 @@ class ModelBundle:
 
 
 def _dump_skops(obj, path: Path) -> None:
-    sio.dump(obj, path)
+    # Compressed: the random-forest estimator shrinks from ~89 MB to ~15 MB,
+    # small enough to commit. Loading is transparent to compression.
+    sio.dump(obj, path, compression=zipfile.ZIP_DEFLATED, compresslevel=9)
 
 
 # Scoped, explicit trust per model family — matching the convention
@@ -88,7 +92,8 @@ def _dump_skops(obj, path: Path) -> None:
 # sklearn.tree._tree.Tree by default for tree-based models (a malicious
 # file could set out-of-bounds node indices), which is not a concern for
 # models this project trains and saves itself. Trust is scoped to exactly
-# the flagged type per family, never a blanket override.
+# the flagged type per family, never a blanket override. Bundles are only
+# ever loaded from this project's own registry or its committed models/.
 _SKOPS_TRUSTED_TYPES: dict[str, list[str]] = {
     "linear_regression": [],
     "random_forest": ["sklearn.tree._tree.Tree"],
@@ -184,6 +189,8 @@ LOADERS: dict[str, Callable[[Path, dict], Forecaster]] = {
 
 
 def load_bundle(directory: Path) -> ModelBundle:
+    """Loads and validates one bundle directory (feature contract must match
+    config/features.py exactly)."""
     directory = Path(directory)
     with open(directory / "schema.json") as f:
         schema = json.load(f)
@@ -205,3 +212,17 @@ def load_bundle(directory: Path) -> ModelBundle:
     scaler = _load_skops_trusted(directory / "scaler.skops")
 
     return ModelBundle(forecaster=forecaster, scaler=scaler, schema=schema)
+
+
+def load_bundles(models_dir: Path) -> dict[str, ModelBundle]:
+    """Loads every bundle directory under models_dir, keyed by model family,
+    in LOADERS order. Raises if the directory holds no bundles."""
+    models_dir = Path(models_dir)
+    bundles = {}
+    for family in LOADERS:
+        directory = models_dir / family
+        if (directory / "schema.json").exists():
+            bundles[family] = load_bundle(directory)
+    if not bundles:
+        raise FileNotFoundError(f"no model bundles found under {models_dir}")
+    return bundles

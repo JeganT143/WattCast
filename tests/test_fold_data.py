@@ -1,6 +1,6 @@
 """Tests for src.evaluation.fold_data.build_fold_datasets — per-fold train-only
 scaling and label purge, composed from the existing pipeline pieces, for the
-registered Phase 5 walk-forward scheme (DECISIONS.md)."""
+registered walk-forward scheme (decisions.md, ADR-009)."""
 
 import dataclasses
 
@@ -21,6 +21,8 @@ from src.evaluation.fold_data import FoldData, build_fold_datasets
 from src.evaluation.folds import FoldSpec, make_folds
 from src.features.build_features import build_features
 from src.pipeline import run_pipeline
+
+pytestmark = pytest.mark.requires_raw_data
 
 REAL_N_TRAIN = [6954, 7962, 8970, 9978, 10986, 11994, 13002, 14010]
 

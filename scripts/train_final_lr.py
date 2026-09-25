@@ -1,7 +1,5 @@
 """Train and register the Phase 6 serving champion: linear regression at
-h=6, fit on the final train+validation window (DECISIONS.md "Phase 6:
-serving registration, 2026-09-25" and "Phase 6: per-fold selection
-evidence, 2026-09-25").
+h=6, fit on the final train+validation window (decisions.md, ADR-012 and ADR-013).
 
 Thin orchestration only — the window, model, bundle, and registry pieces
 are all implemented elsewhere. Refuses to run twice: once results/
@@ -110,8 +108,7 @@ def main(
             "scaler_convention": SCALER_CONVENTION,
             "code_sha": code_sha,
             "selection_basis": (
-                "post-hoc; DECISIONS.md Phase 6 registration 45788c2 "
-                "and per-fold note 30ccfd3"
+                "post-hoc; decisions.md ADR-012 (research log commits 45788c2, 30ccfd3)"
             ),
             "test_partition_used": "false",
         }

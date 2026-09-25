@@ -1,6 +1,5 @@
-"""Tests for the thin FastAPI adapter (DECISIONS.md "Phase 6: serving
-registration, 2026-09-25"). Latency/live values used here are synthetic;
-no test-partition value is read or compared.
+"""Tests for the thin FastAPI adapter (decisions.md, ADR-014).
+Latency/live values used here are synthetic; no test-partition value is read or compared.
 
 Contract: POST /ingest is the only endpoint that mutates the rolling
 buffer (validate + commit, no prediction). POST /predict is read-only:
@@ -310,8 +309,7 @@ def test_real_champion_end_to_end():
 
 
 def test_serving_uses_no_torch_model_or_tensors():
-    """DECISIONS.md "Phase 6: serving dependency claim amendment, 2026-09-25":
-    skops/sklearn transitively import torch via all_estimators() in this
+    """decisions.md, ADR-012: skops/sklearn transitively import torch via all_estimators() in this
     environment, so the literal 'torch' not in sys.modules assertion was
     withdrawn. This checks what actually matters instead: the LR serving
     path never touches a torch model, checkpoint file, or tensor.
@@ -362,7 +360,7 @@ def test_serving_uses_no_torch_model_or_tensors():
         "        assert not isinstance(value, torch.Tensor), value\n"
         "\n"
         "import config.paths as paths\n"
-        "artifact_root = str(paths.PROJECT_ROOT / 'models')\n"
+        "artifact_root = str(paths.MODELS_DIR / 'linear_regression')\n"
         "found_checkpoint = []\n"
         "if os.path.isdir(artifact_root):\n"
         "    for root, _dirs, files in os.walk(artifact_root):\n"

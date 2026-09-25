@@ -3,6 +3,9 @@ Tests for the MLflow logging layer. Every test uses an isolated,
 tmp_path-based SQLite store — never the real db/mlflow.db.
 """
 
+from pathlib import Path
+
+import mlflow
 import numpy as np
 import pytest
 
@@ -10,8 +13,6 @@ from src.evaluation.harness import EvaluationResult
 from src.models.naive import NaivePersistenceForecaster
 from src.models.sklearn_models import LinearRegressionForecaster
 from src.tracking.mlflow_logger import log_evaluation_result
-
-import mlflow
 
 
 def _make_result(model_name="naive_persistence", horizon=1):
@@ -301,27 +302,25 @@ def test_no_model_artifact_when_native_model_none(tmp_path, tracking_uri):
 
 
 def test_logging_never_touches_real_tracking_store(tmp_path, tracking_uri):
+    """Guards the store-fragmentation incident (decisions.md, ADR-010): with a
+    tracking_uri override, the real store file must be neither created nor
+    written. Checked by file state only, so the guard itself never opens it."""
     from config.mlflow_config import TRACKING_URI as REAL_TRACKING_URI
 
-    forecaster = NaivePersistenceForecaster()
-    result = _make_result()
-    scaler_path = _make_scaler_file(tmp_path)
+    real_store = Path(REAL_TRACKING_URI.removeprefix("sqlite:///"))
 
+    def state():
+        return real_store.stat().st_mtime_ns if real_store.exists() else None
+
+    before = state()
     log_evaluation_result(
-        result,
-        forecaster,
+        _make_result(),
+        NaivePersistenceForecaster(),
         mape_threshold=30.0,
-        scaler_path=scaler_path,
+        scaler_path=_make_scaler_file(tmp_path),
         tracking_uri=tracking_uri,
     )
-
-    # the real store must still show exactly its known-good run count (2,
-    # from the confirmed legitimate Phase 0 verification runs) —
-    # this test would fail if the isolated tracking_uri override leaked
-    real_client = mlflow.tracking.MlflowClient(tracking_uri=REAL_TRACKING_URI)
-    real_exp = real_client.get_experiment_by_name("Default")
-    real_runs = real_client.search_runs(real_exp.experiment_id)
-    assert len(real_runs) == 2
+    assert state() == before
 
 
 def test_missing_scaler_path_raises_file_not_found(tracking_uri):

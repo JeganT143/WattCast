@@ -21,6 +21,8 @@ from src.models.naive import NaivePersistenceForecaster
 from src.models.sklearn_models import LinearRegressionForecaster
 from src.pipeline import run_pipeline
 
+pytestmark = pytest.mark.requires_raw_data
+
 
 class _Fake(Forecaster):
     def __init__(self, seed=None, history=0, log=None):

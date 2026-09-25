@@ -1,11 +1,12 @@
-"""Thin FastAPI adapter over ServingService (DECISIONS.md "Phase 6: serving
-registration, 2026-09-25"). Routes depend only on ServingService and the
-Forecaster interface via its bundle's schema dict — there is no model
-class, model path, or model_family branching here.
+"""FastAPI adapter over ServingService (decisions.md, ADR-014 and ADR-016).
 
-Importing this module must not load anything: the champion, the raw
-history, and the rolling buffer are all constructed lazily inside the
-app's lifespan, never at import time.
+Routes depend only on ServingService and each bundle's schema dict — there
+is no model class, model path, or model_family branching here.
+
+Importing this module loads nothing: the bundles in models/ and the seed
+history are read inside the app's lifespan. Run with:
+
+    uvicorn src.serving.app:app
 """
 
 import math
@@ -17,21 +18,16 @@ from typing import Any
 import pandas as pd
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from mlflow.tracking import MlflowClient
 from pydantic import BaseModel
 
-from config.mlflow_config import TRACKING_URI
-from config.paths import RAW_DATA_PATH
-from src.serving.bundle import LOADERS, ModelBundle
+from config.paths import MODELS_DIR, SEED_HISTORY_PATH
+from src.serving.bundle import load_bundles
 from src.serving.buffer import (
-    SEQUENCE_MODEL_RAW_HISTORY,
     DuplicateTimestampError,
     InsufficientHistoryError,
     NonSuccessorTimestampError,
-    seed_buffer,
 )
-from src.serving.registry import CHAMPION_ALIAS, load_champion, registered_model_name
-from src.serving.service import ServingService
+from src.serving.service import ServingService, create_service
 
 
 class IngestRequest(BaseModel):
@@ -43,32 +39,10 @@ class PredictRequest(BaseModel):
     model_families: list[str]
 
 
-def _load_bundle_with_version(client: MlflowClient, family: str) -> ModelBundle:
-    bundle = load_champion(TRACKING_URI, family=family)
-    model_version = client.get_model_version_by_alias(
-        registered_model_name(family), CHAMPION_ALIAS
-    ).version
-    return ModelBundle(
-        forecaster=bundle.forecaster,
-        scaler=bundle.scaler,
-        schema={**bundle.schema, "model_version": int(model_version)},
-    )
-
-
 def _default_load() -> ServingService:
-    # Preloads every family with a registered bundle loader (LOADERS is the
-    # existing single source of truth for which families the bundle
-    # mechanism supports — src/serving/bundle.py), not just linear_regression:
-    # /predict accepts any requested model_families, so startup must resolve
-    # all of them, not only the one the service happens to hold as primary.
-    client = MlflowClient(tracking_uri=TRACKING_URI)
-    bundles = {family: _load_bundle_with_version(client, family) for family in LOADERS}
-    primary = bundles["linear_regression"]
-    extra_bundles = [b for family, b in bundles.items() if family != "linear_regression"]
-
-    raw = pd.read_csv(RAW_DATA_PATH, parse_dates=["date"])
-    buffer = seed_buffer(raw, SEQUENCE_MODEL_RAW_HISTORY, primary.schema["seed_end"])
-    return ServingService(primary, buffer, extra_bundles=extra_bundles)
+    bundles = load_bundles(MODELS_DIR)
+    seed_history = pd.read_csv(SEED_HISTORY_PATH, parse_dates=["date"])
+    return create_service(bundles, seed_history)
 
 
 def create_app(load: Callable[[], ServingService] = _default_load) -> FastAPI:
@@ -77,7 +51,7 @@ def create_app(load: Callable[[], ServingService] = _default_load) -> FastAPI:
         app.state.service = load()
         yield
 
-    app = FastAPI(lifespan=lifespan)
+    app = FastAPI(title="WattCast forecasting API", lifespan=lifespan)
 
     @app.post("/ingest")
     async def ingest(payload: IngestRequest, request: Request) -> Any:
@@ -159,7 +133,7 @@ def create_app(load: Callable[[], ServingService] = _default_load) -> FastAPI:
         last = service.buffer.last_timestamp
         return {
             "model_family": schema["model_family"],
-            "model_version": schema["model_version"],
+            "model_version": schema.get("model_version"),
             "horizon": schema["horizon"],
             "buffer_end": last.isoformat() if last is not None else None,
             "ready": service.buffer.is_ready,

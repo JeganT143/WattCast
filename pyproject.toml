@@ -1,6 +1,7 @@
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = ["slow: loads every committed model bundle"]
 
 [tool.ruff]
 line-length = 120

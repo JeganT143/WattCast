@@ -75,6 +75,7 @@ def specs2(specs):
     return specs[:2]
 
 
+@pytest.mark.requires_raw_data
 def test_a_execute_returns_and_writes_records(df_features, specs2, tmp_path):
     records = execute(
         df_features,
@@ -92,6 +93,7 @@ def test_a_execute_returns_and_writes_records(df_features, specs2, tmp_path):
         assert json.loads(line) == dataclasses.asdict(record)
 
 
+@pytest.mark.requires_raw_data
 def test_b_incremental_write(df_features, specs2, tmp_path):
     records_path = tmp_path / "recs.jsonl"
     seen = []
@@ -113,6 +115,7 @@ def test_b_incremental_write(df_features, specs2, tmp_path):
     assert len(seen) == 8
 
 
+@pytest.mark.requires_raw_data
 def test_c_refuses_to_overwrite(df_features, specs2, tmp_path):
     records_path = tmp_path / "recs.jsonl"
     records_path.write_text("sentinel\n")
@@ -206,6 +209,7 @@ def test_e_write_summary_refuses_before_computing(tmp_path):
     assert summary_path.read_text() == "junk"
 
 
+@pytest.mark.requires_raw_data
 def test_f_main_end_to_end_deterministic_only(tmp_path):
     rc = main(["--out-dir", str(tmp_path), "--folds", "1", "--deterministic-only"])
     assert rc == 0

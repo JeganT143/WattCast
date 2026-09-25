@@ -2,9 +2,11 @@
 
 Registers a saved model bundle directory as run artifacts, creates the
 registered model on first use, and points the "champion" alias at a
-version — no MLflow stages, per current MLflow guidance. The serving
-code depends only on load_champion and the Forecaster interface, never
-on a concrete model_family or file layout.
+version — no MLflow stages, per current MLflow guidance.
+
+Training-time only: scripts/export_serving_models.py copies each
+@champion bundle into models/, which is what the app and API load
+(decisions.md, ADR-010 and ADR-016).
 """
 
 import tempfile
@@ -22,12 +24,8 @@ CHAMPION_ALIAS = "champion"
 _ARTIFACT_PATH = "bundle"
 
 
-# The already-registered LR champion (Stage 3, before this generalization)
-# used the abbreviated name "wattcast_serving_lr_h6", not the full family
-# key "linear_regression" — this mapping preserves that existing name so
-# load_champion/register_bundle keep resolving to the exact same registered
-# model. Families without an explicit abbreviation here use their full
-# LOADERS-table key unabbreviated.
+# linear_regression and random_forest were registered under abbreviated
+# names; the other families use their full key.
 _MODEL_NAME_ABBREVIATIONS = {
     "linear_regression": "lr",
     "random_forest": "rf",
@@ -39,9 +37,7 @@ def registered_model_name(family: str) -> str:
     return f"wattcast_serving_{abbreviation}_h6"
 
 
-# Backward-compatible constant: scripts/train_final_lr.py (untouched, already
-# registered LR) still imports this name directly. Its value is unchanged
-# ("wattcast_serving_lr_h6") — it is now just registered_model_name("linear_regression").
+# Registered name of the primary serving model.
 REGISTERED_MODEL_NAME = registered_model_name("linear_regression")
 
 

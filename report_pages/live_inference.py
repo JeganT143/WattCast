@@ -1,151 +1,231 @@
-"""Live Inference page — same underlying logic as the original single-page
-streamlit_app.py (subprocess-managed FastAPI server, src/ui/client.py
-calls, ingest/predict control flow), restyled for a cleaner layout. No
-behavioral change: same API calls, same error handling, same messages.
+"""Live forecast: the serving core (src/serving/service.py) running
+in-process against the committed bundles in models/ (decisions.md, ADR-017).
+
+The five models are loaded once per server process; every browser session
+gets its own ServingService with a freshly seeded buffer, so visitors never
+see or disturb each other's readings.
 """
 
-import time
+import threading
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
-from report_pages._style import callout, page_header
-from src.ui.client import (
-    ApiClient,
-    ApiError,
-    compute_next_timestamp,
-    find_free_port,
-    start_server_subprocess,
-    wait_for_health,
-)
+from config.paths import MODELS_DIR, SEED_HISTORY_PATH
+from report_pages._style import MODEL_COLORS, callout, page_header
+from src.serving.buffer import DuplicateTimestampError, NonSuccessorTimestampError
+from src.serving.bundle import load_bundles
+from src.serving.service import ServingService, create_service
+from src.ui.report_data import model_label
 
-ALL_FAMILIES = ["linear_regression", "random_forest", "lstm", "gru", "cnn_lstm"]
+STEP = pd.Timedelta(minutes=10)
+HISTORY_POINTS = 36  # 6 hours of context in the chart
+TIME_FORMAT = "%a %d %b %Y, %H:%M"
 
-CAVEAT_BANNER = (
-    "<strong>No model family has been shown to decisively outperform the others.</strong> "
-    "The pre-registered 8-fold walk-forward comparison (DECISIONS.md, "
-    '"Phase 5: walk-forward run results") required a deep model (LSTM/GRU/CNN-LSTM) '
-    "to beat each reference (linear_regression, random_forest) on <strong>both</strong> "
-    'MAE and RMSE across all seeds to count as "shown better" &mdash; all six '
-    'comparisons came back <strong>"not shown"</strong> (deep models were '
-    "consistently better on MAE but worse on RMSE than the linear-regression "
-    "reference). These predictions are shown here for side-by-side comparison "
-    "only, not to declare a winner."
-)
+
+@st.cache_resource(show_spinner="Loading the five models…")
+def _bundles() -> dict:
+    return load_bundles(MODELS_DIR)
+
+
+@st.cache_data
+def _seed_history() -> pd.DataFrame:
+    return pd.read_csv(SEED_HISTORY_PATH, parse_dates=["date"])
 
 
 @st.cache_resource
-def _start_server() -> str:
-    """Starts the FastAPI serving subprocess exactly once per Streamlit
-    server process (not once per script rerun, which is what a plain
-    module-level call would do — st.cache_resource makes the underlying
-    Popen a true singleton across reruns) and registers cleanup so it
-    doesn't outlive this process. Deliberately does NOT wait for health here
-    — that must be re-checked on every rerun (see render()), not cached,
-    otherwise an early "not ready yet" result would be cached forever."""
-    port = find_free_port()
-    proc = start_server_subprocess(port)
+def _predict_lock() -> threading.Lock:
+    # Sequence models set torch's process-global thread count while predicting,
+    # so predictions from concurrent sessions are serialized.
+    return threading.Lock()
 
-    import atexit
 
-    def _cleanup():
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except Exception:
-            proc.kill()
+def _new_session() -> None:
+    st.session_state.service = create_service(_bundles(), _seed_history())
+    st.session_state.n_added = 0
+    st.session_state.flash = None
 
-    atexit.register(_cleanup)
 
-    return f"http://127.0.0.1:{port}"
+def _service() -> ServingService:
+    if "service" not in st.session_state:
+        _new_session()
+    return st.session_state.service
+
+
+def _add_reading() -> None:
+    service = _service()
+    ts = service.buffer.last_timestamp + STEP
+    value = float(st.session_state.reading_wh)
+    try:
+        service.ingest(ts, value)
+    except (DuplicateTimestampError, NonSuccessorTimestampError, ValueError) as exc:
+        st.session_state.flash = f"That reading was not accepted: {exc}"
+        return
+    st.session_state.n_added += 1
+    st.session_state.flash = None
+    st.toast(f"Added {value:g} Wh at {ts:%H:%M}", icon=":material/check:")
+
+
+def _chart(frame: pd.DataFrame, results: list[dict], seed_end: pd.Timestamp) -> alt.LayerChart:
+    history = frame.tail(HISTORY_POINTS).copy()
+    added = history[history["date"] > seed_end]
+    origin = history.iloc[-1]
+
+    ok = [r for r in results if "error" not in r]
+    end = max([origin["date"], *(r["forecast_timestamp"] for r in ok)]) + 2 * STEP
+    domain = [f"{history['date'].iloc[0]:%Y-%m-%dT%H:%M:%S}", f"{end:%Y-%m-%dT%H:%M:%S}"]
+    x = alt.X(
+        "date:T",
+        title=None,
+        scale=alt.Scale(domain=domain),
+        axis=alt.Axis(format="%H:%M", labelAngle=0, tickCount=8, grid=False),
+    )
+    y = alt.Y("Appliances:Q", title="Appliances energy (Wh)", scale=alt.Scale(zero=True))
+    time_tip = alt.Tooltip("date:T", title="Time", format="%d %b %H:%M")
+
+    layers = [
+        alt.Chart(history).mark_line(color="#94A3B8", strokeWidth=1.8).encode(
+            x=x, y=y, tooltip=[time_tip, alt.Tooltip("Appliances:Q", title="Reading (Wh)", format=".0f")]
+        ),
+        alt.Chart(pd.DataFrame({"date": [origin["date"]]})).mark_rule(color="#64748B", strokeDash=[4, 4]).encode(x=x),
+        alt.Chart(pd.DataFrame({"date": [origin["date"]], "label": ["latest reading"]}))
+        .mark_text(align="right", baseline="top", dx=-4, dy=4, color="#64748B", fontSize=11)
+        .encode(x=x, y=alt.value(0), text="label:N"),
+    ]
+    if not added.empty:
+        layers.append(
+            alt.Chart(added).mark_circle(size=60, color="#1A202C").encode(
+                x=x, y=y, tooltip=[time_tip, alt.Tooltip("Appliances:Q", title="Your reading (Wh)", format=".0f")]
+            )
+        )
+
+    if ok:
+        labels = [model_label(r["model_family"]) for r in ok]
+        color = alt.Color(
+            "Model:N",
+            scale=alt.Scale(domain=labels, range=[MODEL_COLORS[r["model_family"]] for r in ok]),
+            legend=alt.Legend(orient="bottom", title=None),
+        )
+        forecasts = pd.DataFrame(
+            {"Model": labels, "date": [r["forecast_timestamp"] for r in ok], "Appliances": [r["prediction_wh"] for r in ok]}
+        )
+        links = pd.concat(
+            [
+                forecasts,
+                forecasts.assign(date=origin["date"], Appliances=origin["Appliances"]),
+            ]
+        )
+        layers += [
+            alt.Chart(links).mark_line(strokeDash=[3, 3], strokeWidth=1.3, opacity=0.8).encode(
+                x=x, y=y, color=color, detail="Model:N"
+            ),
+            alt.Chart(forecasts).mark_point(filled=True, size=110, shape="diamond", opacity=1).encode(
+                x=x,
+                y=y,
+                color=color,
+                tooltip=[
+                    "Model:N",
+                    alt.Tooltip("date:T", title="Forecast for", format="%d %b %H:%M"),
+                    alt.Tooltip("Appliances:Q", title="Forecast (Wh)", format=".1f"),
+                ],
+            ),
+        ]
+    return alt.layer(*layers).properties(height=360)
 
 
 def render() -> None:
-    page_header("Live Inference", "Ingest a synthetic reading, then compare all five families")
-    callout(CAVEAT_BANNER)
+    page_header(
+        "Live forecast",
+        "Play the meter: add the next 10-minute reading and compare every model's forecast for one hour later.",
+    )
 
-    base_url = _start_server()
-    ready = wait_for_health(base_url, timeout=2.0)
+    try:
+        service = _service()
+    except Exception as exc:  # missing or unreadable model files
+        st.error(
+            f"The model bundles in `models/` could not be loaded ({exc}). "
+            "Restore the directory from the repository, or re-export it with "
+            "`python -m scripts.export_serving_models`."
+        )
+        st.stop()
 
-    if not ready:
-        st.warning("Starting server... this page will refresh automatically.")
-        time.sleep(1.0)
-        st.rerun()
+    seed_end = pd.Timestamp(service.bundle.schema["seed_end"])
+    next_ts = service.buffer.last_timestamp + STEP
+    families = service.available_families
+
+    st.markdown(
+        f"Each session starts from the real readings up to **{seed_end:{TIME_FORMAT}}**, where the models' "
+        "training data ends. Enter what the meter reads next; every model then forecasts the reading "
+        "**60 minutes** after your latest one. Your readings live only in this browser session."
+    )
+
+    with st.container(border=True):
+        with st.form("add_reading", border=False, enter_to_submit=True):
+            c1, c2, c3 = st.columns([1.2, 1.4, 1], vertical_alignment="bottom")
+            c1.number_input(
+                "Next reading (Wh)",
+                min_value=0.0,
+                max_value=5000.0,
+                value=60.0,
+                step=10.0,
+                key="reading_wh",
+                help="Half of all recorded readings fall between 50 and 100 Wh (median 60); the highest is 1,080 Wh.",
+            )
+            c2.text_input(
+                "Time of reading",
+                value=f"{next_ts:{TIME_FORMAT}}",
+                disabled=True,
+                help="Readings must arrive in order, exactly 10 minutes apart.",
+            )
+            c3.form_submit_button(
+                "Add reading", type="primary", icon=":material/add:", on_click=_add_reading, width="stretch"
+            )
+        left, right = st.columns([3, 1], vertical_alignment="center")
+        n_added = st.session_state.n_added
+        left.caption(
+            f"{n_added} reading{'s' if n_added != 1 else ''} added this session. "
+            f"Latest reading: {service.buffer.last_timestamp:{TIME_FORMAT}}."
+        )
+        right.button("Reset", icon=":material/restart_alt:", type="tertiary", on_click=_new_session, width="stretch")
+        if st.session_state.flash:
+            st.error(st.session_state.flash)
+
+    selected = st.pills(
+        "Models", families, selection_mode="multi", default=families, format_func=model_label, key="models"
+    )
+    if not selected:
+        st.info("Select at least one model to see its forecast.")
         return
 
-    client = ApiClient(base_url)
-    health = client.health()
-    next_ts = compute_next_timestamp(health)
+    try:
+        with _predict_lock():
+            results = service.predict(list(selected))
+    except Exception as exc:
+        st.error(f"Forecasting failed: {exc}")
+        return
 
-    st.markdown("#### 1 · Ingest a synthetic observation")
-    with st.container(border=True):
-        col1, col2 = st.columns(2)
-        with col1:
-            appliances_value = st.number_input(
-                "Next Appliances value (Wh)", value=60.0, step=1.0
-            )
-        with col2:
-            st.text_input(
-                "Timestamp to ingest at (server-enforced, not editable)",
-                value=str(next_ts),
-                disabled=True,
-            )
+    st.altair_chart(_chart(service.buffer.committed_frame(), results, seed_end), width="stretch")
 
-        if st.button("Ingest", type="primary"):
-            try:
-                result = client.ingest(next_ts, appliances_value)
-                st.success(
-                    f"Ingested at {result['origin_timestamp']} "
-                    f"(buffer {result['have']}/{result['need']})"
-                )
-            except ApiError as e:
-                message = str(e)
-                if "409" in message and "expected_next" in message:
-                    st.error(
-                        "That timestamp was already ingested or is out of order. "
-                        "The server's error detail: " + message
-                    )
-                else:
-                    st.error(f"Ingest failed: {message}")
+    ok = [r for r in results if "error" not in r]
+    table = pd.DataFrame(
+        {
+            "Model": [model_label(r["model_family"]) for r in ok],
+            "Forecast (Wh)": [r["prediction_wh"] for r in ok],
+            "Forecast for": [f"{r['forecast_timestamp']:%a %d %b, %H:%M}" for r in ok],
+        }
+    )
+    st.dataframe(
+        table,
+        hide_index=True,
+        width="stretch",
+        column_config={"Forecast (Wh)": st.column_config.NumberColumn(format="%.1f")},
+    )
+    for r in results:
+        if "error" in r:
+            st.warning(f"{model_label(r['model_family'])} is not available ({r['error']}).")
 
-    st.markdown("#### 2 · Predict")
-    with st.container(border=True):
-        selected_families = st.multiselect(
-            "Model families", options=ALL_FAMILIES, default=ALL_FAMILIES
-        )
-
-        if st.button("Predict", type="primary") and selected_families:
-            try:
-                response = client.predict(selected_families)
-            except ApiError as e:
-                message = str(e)
-                if "503" in message:
-                    st.warning(
-                        "Server reports insufficient history to predict yet "
-                        "(should not happen given startup seeding): " + message
-                    )
-                else:
-                    st.error(f"Predict failed: {message}")
-            else:
-                results = response["results"]
-                ok_results = [r for r in results if "error" not in r]
-                error_results = [r for r in results if "error" in r]
-
-                if ok_results:
-                    table = pd.DataFrame(
-                        [
-                            {
-                                "model_family": r["model_family"],
-                                "prediction_wh": r["prediction_wh"],
-                                "forecast_timestamp": r["forecast_timestamp"],
-                            }
-                            for r in ok_results
-                        ]
-                    )
-                    display_table = table.copy()
-                    display_table["prediction_wh"] = display_table["prediction_wh"].round(2)
-                    st.dataframe(display_table, hide_index=True, use_container_width=True)
-                    st.bar_chart(table.set_index("model_family")["prediction_wh"])
-
-                for r in error_results:
-                    st.warning(f"{r['model_family']}: not available ({r['error']})")
+    callout(
+        "Forecasts are shown side by side, not ranked. In walk-forward evaluation no model family was "
+        "shown to beat the classical references on both MAE and RMSE; see <b>Model comparison</b>."
+    )

@@ -1,6 +1,6 @@
 """Tests for the torch-specific bundle serialization path used by sequence
-model families (DECISIONS.md "Phase 6: deep-model final deployment
-decision, 2026-09-25"). Deliberately separate from the skops path used by
+model families (decisions.md,
+ADR-011 and ADR-012). Deliberately separate from the skops path used by
 the sklearn-based families (linear_regression, random_forest) — these
 tests confirm that separation, not just that loading "works".
 

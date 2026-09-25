@@ -1,5 +1,5 @@
 """Tests for the serving model bundle and MLflow registry loader
-(DECISIONS.md "Phase 6: serving registration, 2026-09-25")."""
+(decisions.md, ADR-011)."""
 
 import numpy as np
 import pytest

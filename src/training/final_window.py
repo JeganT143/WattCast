@@ -1,5 +1,5 @@
 """Final train+validation training window for the Phase 6 serving champion
-(DECISIONS.md "Phase 6: serving registration, 2026-09-25").
+(decisions.md, ADR-013).
 
 Composed entirely from existing pipeline pieces (build_features, fit_scaler,
 transform_with_scaler, build_horizon_dataset, mask_ineligible_labels,

@@ -1,15 +1,13 @@
 """Train and register a Phase 6 serving champion for a new model family,
 generalizing scripts/train_final_lr.py — which is left in place, untouched,
 and remains the script that produced the already-registered LR champion
-(DECISIONS.md "Phase 6: serving registration, 2026-09-25" and "Phase 6:
-per-fold selection evidence, 2026-09-25").
+(decisions.md, ADR-012 and ADR-013).
 
 ALLOWED_FAMILIES is {"random_forest", "lstm", "gru", "cnn_lstm"}. linear_regression
 is explicitly excluded — it is already registered via the original script,
 and re-running it here would risk silently producing a second, divergent LR
 run. The shared SequenceForecaster packaging/loading mechanism was verified
-once against LSTM, then reapplied to gru and cnn_lstm (DECISIONS.md "Phase 6:
-deep-model final deployment decision, 2026-09-25").
+once against LSTM, then reapplied to gru and cnn_lstm (decisions.md, ADR-012).
 """
 
 import argparse
@@ -37,7 +35,7 @@ from src.serving.registry import CHAMPION_ALIAS, register_bundle, registered_mod
 from src.training.final_window import build_final_window
 
 HORIZON = 6
-SEED = 42  # DECISIONS.md "Phase 6: deep-model final deployment decision, 2026-09-25"
+SEED = 42  # a fresh final run, not a walk-forward model (decisions.md, ADR-012)
 ALLOWED_FAMILIES = {"random_forest", "lstm", "gru", "cnn_lstm"}
 SEQUENCE_FAMILIES = {"lstm", "gru", "cnn_lstm"}
 SCALER_CONVENTION = (
@@ -54,7 +52,7 @@ _FORECASTER_FACTORIES = {
     # walk-forward factories in src/evaluation/walk_forward_models.py
     # never override them either), so the existing SequenceForecaster
     # class defaults ARE the source of truth. Retyping them here would be
-    # the config-drift risk DECISIONS.md warned against; omitting them
+    # the config-drift risk decisions.md (ADR-012) warns against; omitting them
     # reuses the exact same defaults Phase 4/5 relied on. Only
     # max_epochs/huber_delta (LSTM_MAX_EPOCHS/HUBER_DELTA, imported above)
     # and seed (a fresh, distinct 42 for this final run) are provided.
@@ -181,8 +179,7 @@ def main(
             "scaler_convention": SCALER_CONVENTION,
             "code_sha": code_sha,
             "selection_basis": (
-                "post-hoc; DECISIONS.md Phase 6 registration 45788c2 "
-                "and per-fold note 30ccfd3"
+                "post-hoc; decisions.md ADR-012 (research log commits 45788c2, 30ccfd3)"
             ),
             "test_partition_used": "false",
         }

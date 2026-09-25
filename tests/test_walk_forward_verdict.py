@@ -1,6 +1,6 @@
 """Tests for src.evaluation.walk_forward_verdict — the pure verdict aggregator
-for the registered Phase 5 walk-forward comparison rule (DECISIONS.md,
-"Phase 5: walk-forward comparison rule (pre-registration)")."""
+for the registered Phase 5 walk-forward comparison rule (decisions.md,
+ADR-009)."""
 
 import copy
 import dataclasses

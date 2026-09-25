@@ -1,5 +1,5 @@
 """Tests for src.evaluation.folds.make_folds — pure expanding-window fold generator
-for the registered Phase 5 walk-forward scheme (DECISIONS.md)."""
+for the registered walk-forward scheme (decisions.md, ADR-009)."""
 
 import dataclasses
 

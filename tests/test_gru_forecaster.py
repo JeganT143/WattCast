@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pytest
 
 from src.evaluation.validation_only import evaluate_on_validation
 from src.models.gru import GRUForecaster
@@ -116,6 +117,7 @@ def test_g_bias_contract():
     assert m.initial_output_bias_ == float(np.median(y))
 
 
+@pytest.mark.requires_processed_data
 def test_h_real_data_smoke_validation_only():
     train_df = pd.read_csv("data/processed/train_t6.csv", parse_dates=["date"])
     val_df = pd.read_csv("data/processed/val_t6.csv", parse_dates=["date"])

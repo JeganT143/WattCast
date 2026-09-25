@@ -1,6 +1,6 @@
 """Pure summary of walk-forward runner records into the registered
 per-(neural model, reference) verdicts and descriptive Tier 2 numbers
-(DECISIONS.md, "Phase 5: walk-forward comparison rule (pre-registration)").
+(decisions.md, ADR-009).
 
 Ratios and verdicts are computed from FoldRunRecord instances only; no
 scoring, evaluation or training happens here, and walk_forward_verdict

@@ -1,5 +1,5 @@
 """Tests for scripts/train_final_lr.py's guard logic and importability
-(DECISIONS.md "Phase 6: serving registration, 2026-09-25")."""
+(decisions.md, ADR-013)."""
 
 import pytest
 

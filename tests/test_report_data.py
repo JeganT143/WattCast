@@ -1,75 +1,28 @@
-"""Tests for src/ui/report_data.py: every function must read a REAL source
-file (results/*.json, results/*.jsonl, DECISIONS.md, README.md,
-config/features.py) — never a mock, never a hardcoded literal that wasn't
-independently cross-checked against that file. Where practical, a test
-re-reads the same source file itself (independent of the function under
-test) and asserts the function's output matches, rather than encoding a
-number that was merely copy-pasted once.
+"""Tests for src/ui/report_data.py: every loader must return exactly what
+the recorded result files contain. Where practical, a test re-reads the
+source file itself (independently of the function under test) and compares.
 """
 
 import json
-import re
 
 import pandas as pd
 
 from config.features import FEATURE_COLUMNS, LAG_STEPS, ROLLING_WINDOWS, SCALED_COLUMNS
-from config.paths import PROJECT_ROOT
+from config.paths import RESULTS_DIR
 from src.ui.report_data import (
+    MODEL_LABELS,
     available_images,
-    load_dataset_summary,
-    load_eda_summary,
+    load_bundle_schemas,
     load_feature_config,
-    load_limitations,
     load_per_fold_table,
     load_tier1_summary,
     load_verdicts,
     load_walk_forward_leaderboard,
 )
 
-DECISIONS_PATH = PROJECT_ROOT / "DECISIONS.md"
-README_PATH = PROJECT_ROOT / "README.md"
-WALK_FORWARD_SUMMARY_PATH = PROJECT_ROOT / "results" / "walk_forward_summary.json"
-WALK_FORWARD_RECORDS_PATH = PROJECT_ROOT / "results" / "walk_forward_records.jsonl"
-FINAL_EVALUATION_PATH = PROJECT_ROOT / "results" / "final_evaluation.json"
-
-
-def test_load_dataset_summary_matches_readme_sentence_independently_reparsed():
-    text = README_PATH.read_text()
-    match = re.search(
-        r"([\d,]+) rows, (\d+) columns, 10-minute sensor intervals spanning "
-        r"~([\d.]+) months \((\d{4}-\d{2}-\d{2}) to (\d{4}-\d{2}-\d{2})\)",
-        text,
-    )
-    assert match is not None, "expected dataset sentence not found in README.md"
-    expected_rows, expected_cols, expected_months, expected_start, expected_end = match.groups()
-
-    summary = load_dataset_summary()
-
-    assert summary["n_rows"] == int(expected_rows.replace(",", "")) == 19735
-    assert summary["n_columns"] == int(expected_cols) == 29
-    assert summary["span_months"] == float(expected_months) == 4.5
-    assert summary["start_date"] == expected_start == "2016-01-11"
-    assert summary["end_date"] == expected_end == "2016-05-27"
-    assert summary["interval_minutes"] == 10
-
-
-def test_load_eda_summary_bullets_are_verbatim_from_decisions_md():
-    text = DECISIONS_PATH.read_text()
-    lines = text.splitlines()
-    heading_idx = lines.index("## Phase 1 — EDA Key Findings")
-    expected_bullets = []
-    for line in lines[heading_idx + 1 :]:
-        if line.strip().startswith("## "):
-            break
-        if line.strip().startswith("- "):
-            expected_bullets.append(line.strip()[2:])
-
-    bullets = load_eda_summary()
-
-    assert bullets == expected_bullets
-    assert len(bullets) > 0
-    assert any("19,735 rows" in b for b in bullets)
-    assert any("ADF" in b for b in bullets)
+WALK_FORWARD_SUMMARY_PATH = RESULTS_DIR / "walk_forward_summary.json"
+WALK_FORWARD_RECORDS_PATH = RESULTS_DIR / "walk_forward_records.jsonl"
+FINAL_EVALUATION_PATH = RESULTS_DIR / "final_evaluation.json"
 
 
 def test_load_feature_config_matches_config_features_py_directly():
@@ -79,25 +32,6 @@ def test_load_feature_config_matches_config_features_py_directly():
     assert config["lag_steps"] == list(LAG_STEPS) == [1, 2, 3, 4, 5, 6, 144]
     assert config["rolling_windows"] == list(ROLLING_WINDOWS) == [6, 18]
     assert config["scaled_columns"] == list(SCALED_COLUMNS)
-
-
-def test_load_limitations_bullets_are_verbatim_from_decisions_md():
-    text = DECISIONS_PATH.read_text()
-    lines = text.splitlines()
-    heading_idx = lines.index("### Known limits (registered, restated)")
-    expected_bullets = []
-    for line in lines[heading_idx + 1 :]:
-        if line.strip().startswith("#"):
-            break
-        if line.strip().startswith("- "):
-            expected_bullets.append(line.strip()[2:])
-
-    limitations = load_limitations()
-
-    assert limitations == expected_bullets
-    assert len(limitations) > 0
-    assert any("138-day" in item for item in limitations)
-    assert any("one-sided" in item for item in limitations)
 
 
 def test_load_walk_forward_leaderboard_matches_summary_json_per_model_means():
@@ -179,6 +113,20 @@ def test_load_tier1_summary_matches_final_evaluation_json():
     assert tier1["ref_mae"] == raw["tier1_reference"]["ref_mae"] == 42.39131825471337
     assert tier1["ref_rmse"] == raw["tier1_reference"]["ref_rmse"] == 80.61873658942119
 
+    runs = {r["seed"]: r for r in raw["horizons"]["6"]["runs"]}
+    assert [r["seed"] for r in tier1["runs"]] == [42, 43, 44]
+    for row in tier1["runs"]:
+        assert row["test_mae"] == runs[row["seed"]]["test_mae"]
+        assert row["test_rmse"] == runs[row["seed"]]["test_rmse"]
+        assert row["mae_pass"] == (row["test_mae"] <= tier1["threshold_mae"])
+        assert row["rmse_pass"] == (row["test_rmse"] <= tier1["threshold_rmse"])
+
+
+def test_every_recorded_model_has_a_display_label():
+    table = load_walk_forward_leaderboard()
+    assert set(table["model"]) <= set(MODEL_LABELS)
+    assert table["label"].notna().all()
+
 
 def test_available_images_lists_only_files_that_actually_exist_on_disk():
     images = available_images()
@@ -193,3 +141,13 @@ def test_available_images_lists_only_files_that_actually_exist_on_disk():
         "walk_forward_ratios",
         "final_predictions_h6",
     }
+
+
+def test_bundle_schemas_cover_the_five_served_families_with_one_feature_contract():
+    schemas = load_bundle_schemas()
+    assert list(schemas) == ["linear_regression", "random_forest", "lstm", "gru", "cnn_lstm"]
+    for family, schema in schemas.items():
+        assert schema["model_family"] == family
+        assert schema["feature_columns"] == list(FEATURE_COLUMNS)
+        assert schema["horizon"] == 6
+        assert schema["seed_end"] == "2016-04-29 23:50:00"

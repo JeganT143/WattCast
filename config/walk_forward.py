@@ -1,6 +1,5 @@
-"""Phase 5 walk-forward comparison rule — registered constants (DECISIONS.md,
-"Phase 5: walk-forward comparison rule (pre-registration)"). Do not change
-without a new dated DECISIONS.md entry."""
+"""Walk-forward comparison rule — pre-registered constants (decisions.md,
+ADR-009). Changing any of them needs a new dated decision record."""
 
 FIRST_EVAL_START = "2016-03-01 00:00"
 N_FOLDS = 8

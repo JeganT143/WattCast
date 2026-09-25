@@ -74,7 +74,7 @@ def test_unscaled_required_columns_are_bounded_on_real_train_data():
 
     path = Path(__file__).resolve().parents[1] / "data" / "processed" / "train_t6.csv"
     if not path.exists():
-        pytest.skip("processed data not present (run `dvc pull`)")
+        pytest.skip("processed data not present (run `make data`)")
     df = pd.read_csv(path)
     unscaled = [c for c in _model().required_columns if c not in SCALED_COLUMNS]
     assert unscaled, "expected some unscaled columns"

@@ -207,7 +207,7 @@ _BASELINES = {
 def test_four_baselines_reproduce_the_fixture_validation_metrics_and_counts(name, h):
     train_path, val_path = PROCESSED / f"train_t{h}.csv", PROCESSED / f"val_t{h}.csv"
     if not (train_path.exists() and val_path.exists() and FIXTURE.exists()):
-        pytest.skip("processed data or golden fixture not present (run `dvc pull`)")
+        pytest.skip("processed data or golden fixture not present (run `make data`)")
     train = pd.read_csv(train_path, parse_dates=["date"])
     val = pd.read_csv(val_path, parse_dates=["date"])
     expected = json.loads(FIXTURE.read_text())["results"][f"{name}|h{h}"]

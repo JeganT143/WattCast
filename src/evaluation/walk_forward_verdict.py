@@ -1,5 +1,5 @@
 """Pure verdict aggregator for the registered Phase 5 walk-forward comparison
-rule (DECISIONS.md, "Phase 5: walk-forward comparison rule (pre-registration)").
+rule (decisions.md, ADR-009).
 
 Inputs are per-fold ratios (model metric / reference metric) supplied by the
 caller for each neural seed. No I/O, no mutation of the inputs."""

@@ -1,5 +1,5 @@
 """The serving core, split into a state-mutating ingest and a read-only
-predict (Phase 6 follow-on: /ingest + /predict contract split).
+predict (decisions.md, ADR-014).
 
 ingest() is the only operation that ever advances the RollingBuffer:
 validate the successor/duplicate timestamp rule and the finite-value
@@ -20,10 +20,16 @@ import pandas as pd
 from config.features import SCALED_COLUMNS
 from src.preprocessing.scaling import transform_with_scaler
 from src.serving.bundle import ModelBundle
-from src.serving.buffer import InsufficientHistoryError, RollingBuffer
+from src.serving.buffer import (
+    SEQUENCE_MODEL_RAW_HISTORY,
+    InsufficientHistoryError,
+    RollingBuffer,
+    seed_buffer,
+)
 from src.serving.features import serving_feature_frame, serving_feature_row
 
 STEP = pd.Timedelta(minutes=10)
+PRIMARY_FAMILY = "linear_regression"
 
 
 class ServingService:
@@ -107,3 +113,20 @@ class ServingService:
                     }
                 )
             return results
+
+
+def create_service(
+    bundles: dict[str, ModelBundle],
+    seed_history: pd.DataFrame,
+    primary_family: str = PRIMARY_FAMILY,
+) -> ServingService:
+    """Builds a ready-to-serve ServingService: every bundle is registered,
+    and a fresh buffer is seeded from pre-test history ending at the primary
+    bundle's seed_end. The buffer is sized for the sequence models, the
+    largest history requirement of any served family."""
+    if primary_family not in bundles:
+        raise ValueError(f"primary family {primary_family!r} has no bundle")
+    primary = bundles[primary_family]
+    buffer = seed_buffer(seed_history, SEQUENCE_MODEL_RAW_HISTORY, primary.schema["seed_end"])
+    extra = [bundle for family, bundle in bundles.items() if family != primary_family]
+    return ServingService(primary, buffer, extra_bundles=extra)

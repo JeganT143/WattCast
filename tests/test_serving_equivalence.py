@@ -1,7 +1,6 @@
 """Registered feature-row and prediction equivalence between the offline
 canonical pipeline and the live serving path, using the real registered
-LR champion (DECISIONS.md "Phase 6: serving registration, 2026-09-25",
-section 5).
+LR champion (decisions.md, ADR-015).
 
 Only rows with date < 2016-04-30 are ever read. Latency/API tests use
 synthetic values elsewhere; this file reads real pre-boundary history
@@ -10,15 +9,15 @@ because the equivalence claim is about the real feature pipeline.
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from config.features import FEATURE_COLUMNS, SCALED_COLUMNS, TARGET_HORIZONS
-from config.mlflow_config import TRACKING_URI
-from config.paths import RAW_DATA_PATH
+from config.paths import MODELS_DIR, RAW_DATA_PATH
 from src.features.build_features import build_features
 from src.preprocessing.scaling import transform_with_scaler
 from src.serving.buffer import RollingBuffer, required_raw_history
+from src.serving.bundle import load_bundle
 from src.serving.features import serving_feature_row
-from src.serving.registry import load_champion
 from src.serving.service import ServingService
 
 BOUNDARY = pd.Timestamp("2016-04-30")
@@ -26,7 +25,7 @@ RAW_FLOOR = 1e-12
 PREDICTION_FLOOR = 1e-10
 RELATIVE_TOLERANCE = 1e-12
 
-# DECISIONS.md "Phase 6: equivalence bar amendment, 2026-09-25": the
+# decisions.md, ADR-015 (amendment): the
 # original 1e-12 relative/floor bar was violated only by rolling standard
 # deviation (roll6_std, roll18_std), a floating-point accumulation-path
 # effect (offline computes over the full series, serving over the
@@ -76,13 +75,14 @@ def _selected_positions(n_rows: int) -> np.ndarray:
     return np.unique(positions)
 
 
+@pytest.mark.requires_raw_data
 def test_feature_and_prediction_equivalence():
     df_raw = pd.read_csv(RAW_DATA_PATH, parse_dates=["date"])
     pre = df_raw[df_raw["date"] < BOUNDARY].sort_values("date").reset_index(drop=True)
 
     df_features_offline = build_features(pre, target_horizons=TARGET_HORIZONS)
 
-    champion = load_champion(TRACKING_URI, family="linear_regression")
+    champion = load_bundle(MODELS_DIR / "linear_regression")
     capacity = required_raw_history()
 
     positions = _selected_positions(len(df_features_offline))

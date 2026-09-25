@@ -1,5 +1,5 @@
 """Serving-side rolling buffer: append-and-predict is one atomic operation
-(DECISIONS.md "Phase 6: serving registration, 2026-09-25", sections 3-4).
+(decisions.md, ADR-014).
 
 required_raw_history is defined in src/serving/bundle.py (the bundle
 schema needs it at training time, before this module exists at runtime)

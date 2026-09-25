@@ -1,27 +1,28 @@
-env/
-db/
-mlartifacts/
-mlruns/
-mlflow.db
-__pycache__/
-*.pyc
-*.pyo
-.pytest_cache/
-.ipynb_checkpoints/
-*.egg-info/
-.DS_Store
 # Python
+__pycache__/
 *.py[cod]
+*.egg-info/
+.pytest_cache/
 .ruff_cache/
-# Environments
+.ipynb_checkpoints/
+
+# Virtual environments
 /env/
 /.venv/
-# MLflow local stores (recreated by running the tracking code)
+/venv/
+
+# Local MLflow tracking store and run artifacts (training-time only;
+# the serving bundles the app loads are exported to models/ and committed)
 /db/
-/models/
-/mlruns/
+mlruns/
+mlartifacts/
+mlflow.db
+
+# Streamlit secrets (none are required; keep any local ones out of git)
+.streamlit/secrets.toml
+
 # OS / editor
+.DS_Store
 .idea/
 .vscode/
-
 .claude/

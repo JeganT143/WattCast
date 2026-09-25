@@ -1,5 +1,5 @@
 """Tests for the final train+validation training window (Phase 6 registration,
-DECISIONS.md "Phase 6: serving registration, 2026-09-25")."""
+decisions.md, ADR-013)."""
 
 import numpy as np
 import pandas as pd
@@ -17,6 +17,7 @@ def df_raw():
     return pd.read_csv(RAW_DATA_PATH, parse_dates=["date"])
 
 
+@pytest.mark.requires_raw_data
 def test_registered_counts_and_dates(df_raw):
     window = build_final_window(df_raw, horizon=6, boundary=BOUNDARY)
 
@@ -34,6 +35,7 @@ def test_registered_counts_and_dates(df_raw):
     assert labels.iloc[:-6].notna().all()
 
 
+@pytest.mark.requires_raw_data
 def test_scaler_n_samples_seen(df_raw):
     window = build_final_window(df_raw, horizon=6, boundary=BOUNDARY)
     seen = window.scaler.n_samples_seen_
@@ -50,6 +52,7 @@ def test_scaler_n_samples_seen(df_raw):
             assert seen[idx] == 15738 - (window_size - 1), col
 
 
+@pytest.mark.requires_raw_data
 def test_independent_of_test_partition_values(df_raw):
     window_a = build_final_window(df_raw, horizon=6, boundary=BOUNDARY)
 

@@ -1,1 +1,1 @@
-"""Single-window evaluation harness and shared metrics: src.evaluation.harness, src.evaluation.metrics."""
+"""Evaluation: single-window harness, validation-only path, walk-forward runner and verdicts, metrics."""

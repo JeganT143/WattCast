@@ -1,85 +1,58 @@
-"""Pure, pytest-tested functions that load Streamlit report content
-directly from already-registered source files — results/*.json,
-results/walk_forward_records.jsonl, DECISIONS.md, README.md, and
-config/features.py. Each function reads (or does a direct arithmetic
-aggregation of) a real file and cites its source in its own docstring.
-Nothing here invents a number: a value not present in a source file is
-either read as-is or, for the per-fold table, computed by a plain mean over
-raw recorded rows — never estimated or guessed.
+"""Loaders for the result files the Streamlit app displays.
+
+Every number shown in the app's result tables is read here from a recorded
+file in results/ (or derived from one by a plain mean), never retyped:
+
+- results/walk_forward_summary.json   8-fold walk-forward means and verdicts
+- results/walk_forward_records.jsonl  one record per (fold, model, seed)
+- results/final_evaluation.json       the one-shot held-out test check
+- models/<family>/schema.json         the contract of each deployed model
 """
 
 import json
-import re
 
 import pandas as pd
 
 from config.features import FEATURE_COLUMNS, LAG_STEPS, ROLLING_WINDOWS, SCALED_COLUMNS
-from config.paths import PROJECT_ROOT
+from config.paths import MODELS_DIR, PROJECT_ROOT, RESULTS_DIR
 
-DECISIONS_PATH = PROJECT_ROOT / "DECISIONS.md"
-README_PATH = PROJECT_ROOT / "README.md"
-WALK_FORWARD_SUMMARY_PATH = PROJECT_ROOT / "results" / "walk_forward_summary.json"
-WALK_FORWARD_RECORDS_PATH = PROJECT_ROOT / "results" / "walk_forward_records.jsonl"
-FINAL_EVALUATION_PATH = PROJECT_ROOT / "results" / "final_evaluation.json"
+WALK_FORWARD_SUMMARY_PATH = RESULTS_DIR / "walk_forward_summary.json"
+WALK_FORWARD_RECORDS_PATH = RESULTS_DIR / "walk_forward_records.jsonl"
+FINAL_EVALUATION_PATH = RESULTS_DIR / "final_evaluation.json"
 DOCS_IMG_DIR = PROJECT_ROOT / "docs" / "img"
-RESULTS_DIR = PROJECT_ROOT / "results"
+
+MODEL_LABELS = {
+    "naive_persistence": "Naive persistence",
+    "naive_seasonal": "Naive seasonal",
+    "linear_regression": "Linear regression",
+    "random_forest": "Random forest",
+    "lstm": "LSTM",
+    "gru": "GRU",
+    "cnn_lstm": "CNN-LSTM",
+}
+
+MODEL_GROUPS = {
+    "naive_persistence": "Naive baseline",
+    "naive_seasonal": "Naive baseline",
+    "linear_regression": "Classical",
+    "random_forest": "Classical",
+    "lstm": "Deep sequence",
+    "gru": "Deep sequence",
+    "cnn_lstm": "Deep sequence",
+}
 
 
-def _bullets_after_heading(lines: list[str], heading: str) -> list[str]:
-    heading_idx = None
-    for i, line in enumerate(lines):
-        if line.strip() == heading:
-            heading_idx = i
-            break
-    if heading_idx is None:
-        raise ValueError(f"heading {heading!r} not found in DECISIONS.md")
-
-    bullets = []
-    for line in lines[heading_idx + 1 :]:
-        stripped = line.strip()
-        if stripped.startswith("#"):
-            break
-        if stripped.startswith("- "):
-            bullets.append(stripped[2:])
-    if not bullets:
-        raise ValueError(f"no bullet items found under heading {heading!r}")
-    return bullets
+def model_label(model: str) -> str:
+    return MODEL_LABELS.get(model, model)
 
 
-def load_dataset_summary() -> dict:
-    """Source: README.md's opening description sentence — "<rows> rows,
-    <cols> columns, 10-minute sensor intervals spanning ~<months> months
-    (<start> to <end>)"."""
-    text = README_PATH.read_text()
-    match = re.search(
-        r"([\d,]+) rows, (\d+) columns, 10-minute sensor intervals spanning "
-        r"~([\d.]+) months \((\d{4}-\d{2}-\d{2}) to (\d{4}-\d{2}-\d{2})\)",
-        text,
-    )
-    if match is None:
-        raise ValueError("could not find the dataset summary sentence in README.md")
-    n_rows, n_columns, months, start, end = match.groups()
-    return {
-        "n_rows": int(n_rows.replace(",", "")),
-        "n_columns": int(n_columns),
-        "interval_minutes": 10,
-        "span_months": float(months),
-        "start_date": start,
-        "end_date": end,
-        "source": "README.md",
-    }
-
-
-def load_eda_summary() -> list[str]:
-    """Source: DECISIONS.md, "## Phase 1 — EDA Key Findings" bullet list."""
-    lines = DECISIONS_PATH.read_text().splitlines()
-    return _bullets_after_heading(lines, "## Phase 1 — EDA Key Findings")
+def _read_json(path) -> dict:
+    with open(path) as f:
+        return json.load(f)
 
 
 def load_feature_config() -> dict:
-    """Source: config/features.py (FEATURE_COLUMNS, LAG_STEPS,
-    ROLLING_WINDOWS, SCALED_COLUMNS) — imported directly, never re-parsed
-    or retyped."""
+    """The feature contract, imported from config/features.py."""
     return {
         "feature_columns": list(FEATURE_COLUMNS),
         "lag_steps": list(LAG_STEPS),
@@ -88,23 +61,15 @@ def load_feature_config() -> dict:
     }
 
 
-def load_limitations() -> list[str]:
-    """Source: DECISIONS.md, "### Known limits (registered, restated)"
-    bullet list (Phase 5 walk-forward run-results section)."""
-    lines = DECISIONS_PATH.read_text().splitlines()
-    return _bullets_after_heading(lines, "### Known limits (registered, restated)")
-
-
 def load_walk_forward_leaderboard() -> pd.DataFrame:
-    """Source: results/walk_forward_summary.json,
-    summary.per_model_means — the registered mean MAE/RMSE/MAPE over 8
-    folds (and over 3 seeds for the neural models), read as-is."""
-    with open(WALK_FORWARD_SUMMARY_PATH) as f:
-        summary = json.load(f)
-    means = summary["summary"]["per_model_means"]
+    """Mean MAE/RMSE/MAPE over the 8 folds (and over 3 seeds for the deep
+    models), sorted by mean MAE."""
+    means = _read_json(WALK_FORWARD_SUMMARY_PATH)["summary"]["per_model_means"]
     rows = [
         {
             "model": model,
+            "label": model_label(model),
+            "group": MODEL_GROUPS.get(model, ""),
             "mean_mae": vals["mean_mae"],
             "mean_rmse": vals["mean_rmse"],
             "mean_mape": vals["mean_mape"],
@@ -115,42 +80,31 @@ def load_walk_forward_leaderboard() -> pd.DataFrame:
 
 
 def load_verdicts() -> pd.DataFrame:
-    """Source: results/walk_forward_summary.json, summary.verdicts — the
-    six registered (neural model, reference) walk-forward verdicts (all
-    "not shown" per the pre-registered rule, DECISIONS.md "Phase 5:
-    walk-forward comparison rule")."""
-    with open(WALK_FORWARD_SUMMARY_PATH) as f:
-        summary = json.load(f)
-    verdicts = summary["summary"]["verdicts"]
-    rows = []
-    for model, by_ref in verdicts.items():
-        for reference, v in by_ref.items():
-            rows.append(
-                {
-                    "model": model,
-                    "reference": reference,
-                    "verdict": v["verdict"],
-                    "mean_mae_ratios": v["mean_mae_ratios"],
-                    "mean_rmse_ratios": v["mean_rmse_ratios"],
-                }
-            )
+    """The six registered (deep model, reference) walk-forward verdicts with
+    their per-seed mean MAE and RMSE ratios (seeds 42, 43, 44)."""
+    verdicts = _read_json(WALK_FORWARD_SUMMARY_PATH)["summary"]["verdicts"]
+    rows = [
+        {
+            "model": model,
+            "reference": reference,
+            "verdict": v["verdict"],
+            "mean_mae_ratios": v["mean_mae_ratios"],
+            "mean_rmse_ratios": v["mean_rmse_ratios"],
+        }
+        for model, by_reference in verdicts.items()
+        for reference, v in by_reference.items()
+    ]
     return pd.DataFrame(rows)
 
 
 def load_per_fold_table() -> pd.DataFrame:
-    """Source: results/walk_forward_records.jsonl — one JSON line per
-    (fold, model, seed) record. Grouped by (fold, model) and averaged over
-    seeds (naive/linear_regression/random_forest have a single seed=null
-    record per fold; the three neural models have 3 seeded records per
-    fold) — a direct arithmetic aggregate of the raw recorded rows, not a
-    separate or re-derived computation."""
-    records = []
+    """Per-(fold, model) metrics, averaged over seeds where a model has
+    several (the deep models have 3 seeded records per fold)."""
     with open(WALK_FORWARD_RECORDS_PATH) as f:
-        for line in f:
-            records.append(json.loads(line))
-    df = pd.DataFrame(records)
+        records = [json.loads(line) for line in f]
     return (
-        df.groupby(["fold", "model"], as_index=False)[["mae", "rmse", "mape"]]
+        pd.DataFrame(records)
+        .groupby(["fold", "model"], as_index=False)[["mae", "rmse", "mape"]]
         .mean()
         .sort_values(["fold", "model"])
         .reset_index(drop=True)
@@ -158,11 +112,20 @@ def load_per_fold_table() -> pd.DataFrame:
 
 
 def load_tier1_summary() -> dict:
-    """Source: results/final_evaluation.json's "tier1"/"tier1_reference"
-    sections — the Phase 4 single-window LSTM-vs-linear_regression (h=6)
-    Tier 1 verdict."""
-    with open(FINAL_EVALUATION_PATH) as f:
-        data = json.load(f)
+    """The one-shot held-out test check at h=6: LSTM (3 seeds) against
+    0.99 x the linear-regression test MAE and RMSE."""
+    data = _read_json(FINAL_EVALUATION_PATH)
+    passes = {p["seed"]: p for p in data["tier1"]["per_seed"]}
+    runs = [
+        {
+            "seed": run["seed"],
+            "test_mae": run["test_mae"],
+            "test_rmse": run["test_rmse"],
+            "mae_pass": passes[run["seed"]]["mae_pass"],
+            "rmse_pass": passes[run["seed"]]["rmse_pass"],
+        }
+        for run in data["horizons"]["6"]["runs"]
+    ]
     return {
         "shown": data["tier1"]["shown"],
         "threshold_mae": data["tier1"]["threshold_mae"],
@@ -170,13 +133,22 @@ def load_tier1_summary() -> dict:
         "ref_mae": data["tier1_reference"]["ref_mae"],
         "ref_rmse": data["tier1_reference"]["ref_rmse"],
         "per_seed": data["tier1"]["per_seed"],
+        "runs": runs,
     }
 
 
+def load_bundle_schemas() -> dict[str, dict]:
+    """schema.json of every deployed bundle, keyed by family in display
+    order. Reads JSON only — no model is loaded."""
+    schemas = {}
+    for family in MODEL_LABELS:
+        path = MODELS_DIR / family / "schema.json"
+        if path.exists():
+            schemas[family] = _read_json(path)
+    return schemas
+
+
 def available_images() -> dict:
-    """Source: a filesystem listing of docs/img/*.png and results/*.png —
-    confirms which images actually exist, rather than assuming filenames
-    from a prior stage's naming convention."""
     return {
         "walk_forward_folds": DOCS_IMG_DIR / "walk_forward_folds.png",
         "walk_forward_means": DOCS_IMG_DIR / "walk_forward_means.png",

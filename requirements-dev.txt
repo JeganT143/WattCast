@@ -1,0 +1,19 @@
+# Everything needed to run the API, retrain models, rerun the notebooks and
+# run the test suite. Includes the runtime requirements.
+-r requirements.txt
+
+# REST API
+fastapi==0.141.1
+uvicorn==0.53.0
+httpx==0.28.1
+
+# Training, tracking and research
+mlflow==3.16.1
+dvc==3.67.1
+statsmodels==0.15.0
+matplotlib==3.11.2
+ipykernel==7.3.0
+
+# Quality
+pytest==9.1.1
+ruff==0.16.8
