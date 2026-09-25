@@ -1,0 +1,12 @@
+{
+  "code_sha": "f908634769ca99b69f009aee9f7af6b88f50d923",
+  "model_family": "random_forest",
+  "model_version": 1,
+  "n_fittable": 15588,
+  "n_lag144_finite": 15594,
+  "n_mask_rows": 15738,
+  "run_id": "7f32a4b5eab04899862df78b2634c9c4",
+  "tracking_store_path": "db/mlflow.db",
+  "train_end": "2016-04-29 23:50:00",
+  "train_start": "2016-01-12 17:00:00"
+}
