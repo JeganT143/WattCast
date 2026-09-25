@@ -22,7 +22,7 @@ from pydantic import BaseModel
 
 from config.mlflow_config import TRACKING_URI
 from config.paths import RAW_DATA_PATH
-from src.serving.bundle import ModelBundle
+from src.serving.bundle import LOADERS, ModelBundle
 from src.serving.buffer import (
     SEQUENCE_MODEL_RAW_HISTORY,
     DuplicateTimestampError,
@@ -30,7 +30,7 @@ from src.serving.buffer import (
     NonSuccessorTimestampError,
     seed_buffer,
 )
-from src.serving.registry import CHAMPION_ALIAS, REGISTERED_MODEL_NAME, load_champion
+from src.serving.registry import CHAMPION_ALIAS, load_champion, registered_model_name
 from src.serving.service import ServingService
 
 
@@ -43,19 +43,32 @@ class PredictRequest(BaseModel):
     model_families: list[str]
 
 
-def _default_load() -> ServingService:
-    bundle = load_champion(TRACKING_URI, family="linear_regression")
-    client = MlflowClient(tracking_uri=TRACKING_URI)
-    model_version = client.get_model_version_by_alias(REGISTERED_MODEL_NAME, CHAMPION_ALIAS).version
-    bundle = ModelBundle(
+def _load_bundle_with_version(client: MlflowClient, family: str) -> ModelBundle:
+    bundle = load_champion(TRACKING_URI, family=family)
+    model_version = client.get_model_version_by_alias(
+        registered_model_name(family), CHAMPION_ALIAS
+    ).version
+    return ModelBundle(
         forecaster=bundle.forecaster,
         scaler=bundle.scaler,
         schema={**bundle.schema, "model_version": int(model_version)},
     )
 
+
+def _default_load() -> ServingService:
+    # Preloads every family with a registered bundle loader (LOADERS is the
+    # existing single source of truth for which families the bundle
+    # mechanism supports — src/serving/bundle.py), not just linear_regression:
+    # /predict accepts any requested model_families, so startup must resolve
+    # all of them, not only the one the service happens to hold as primary.
+    client = MlflowClient(tracking_uri=TRACKING_URI)
+    bundles = {family: _load_bundle_with_version(client, family) for family in LOADERS}
+    primary = bundles["linear_regression"]
+    extra_bundles = [b for family, b in bundles.items() if family != "linear_regression"]
+
     raw = pd.read_csv(RAW_DATA_PATH, parse_dates=["date"])
-    buffer = seed_buffer(raw, SEQUENCE_MODEL_RAW_HISTORY, bundle.schema["seed_end"])
-    return ServingService(bundle, buffer)
+    buffer = seed_buffer(raw, SEQUENCE_MODEL_RAW_HISTORY, primary.schema["seed_end"])
+    return ServingService(primary, buffer, extra_bundles=extra_bundles)
 
 
 def create_app(load: Callable[[], ServingService] = _default_load) -> FastAPI:
@@ -159,7 +172,7 @@ def create_app(load: Callable[[], ServingService] = _default_load) -> FastAPI:
     @app.get("/model")
     async def model(request: Request) -> Any:
         service: ServingService = request.app.state.service
-        return dict(service.bundle.schema)
+        return {**service.bundle.schema, "available_families": service.available_families}
 
     return app
 

@@ -37,7 +37,7 @@ class _FakeBuffer:
 
 
 class _FakeService:
-    def __init__(self, mode="ok", ready=True):
+    def __init__(self, mode="ok", ready=True, available_families=("linear_regression",)):
         self.mode = mode
         schema = {"model_family": "linear_regression", "horizon": 6, "model_version": 1}
         self.bundle = ModelBundle(forecaster=None, scaler=None, schema=schema)
@@ -46,6 +46,7 @@ class _FakeService:
             last_timestamp=pd.Timestamp("2016-04-29 23:50:00") if ready else None,
             have=145 if ready else 100,
         )
+        self.available_families = list(available_families)
 
     def ingest(self, ts, appliances):
         if self.mode == "duplicate":
@@ -78,8 +79,8 @@ class _FakeService:
         return results
 
 
-def _client_for(mode="ok", ready=True):
-    app = create_app(load=lambda: _FakeService(mode, ready=ready))
+def _client_for(mode="ok", ready=True, available_families=("linear_regression",)):
+    app = create_app(load=lambda: _FakeService(mode, ready=ready, available_families=available_families))
     return TestClient(app)
 
 
@@ -250,6 +251,30 @@ def test_model_route():
         resp = client.get("/model")
         assert resp.status_code == 200
         assert resp.json()["model_family"] == "linear_regression"
+
+
+def test_model_route_reports_available_families():
+    families = ("linear_regression", "random_forest", "lstm", "gru", "cnn_lstm")
+    with _client_for("ok", available_families=families) as client:
+        resp = client.get("/model")
+        assert resp.status_code == 200
+        assert sorted(resp.json()["available_families"]) == sorted(families)
+
+
+@pytest.mark.slow
+def test_real_champion_startup_preloads_all_five_registered_families():
+    """The integration gap this test exists to catch: startup must preload
+    every currently-registered family's champion, not just linear_regression
+    — otherwise /predict with model_families=[...all five...] against the
+    live default app would return {"error": "not_available"} for four of
+    the five families, even though they are all registered champions."""
+    app = create_app()
+    with TestClient(app) as client:
+        resp = client.get("/model")
+        assert resp.status_code == 200
+        assert sorted(resp.json()["available_families"]) == sorted(
+            ["linear_regression", "random_forest", "lstm", "gru", "cnn_lstm"]
+        )
 
 
 @pytest.mark.slow

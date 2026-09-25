@@ -21,17 +21,28 @@ from config.features import SCALED_COLUMNS
 from src.preprocessing.scaling import transform_with_scaler
 from src.serving.bundle import ModelBundle
 from src.serving.buffer import InsufficientHistoryError, RollingBuffer
-from src.serving.features import serving_feature_row
+from src.serving.features import serving_feature_frame, serving_feature_row
 
 STEP = pd.Timedelta(minutes=10)
 
 
 class ServingService:
-    def __init__(self, bundle: ModelBundle, buffer: RollingBuffer):
+    def __init__(
+        self,
+        bundle: ModelBundle,
+        buffer: RollingBuffer,
+        extra_bundles: list[ModelBundle] | None = None,
+    ):
         self.bundle = bundle
         self.buffer = buffer
         self._bundles = {bundle.schema["model_family"]: bundle}
+        for extra in extra_bundles or []:
+            self._bundles[extra.schema["model_family"]] = extra
         self._lock = threading.Lock()
+
+    @property
+    def available_families(self) -> list[str]:
+        return list(self._bundles)
 
     def ingest(self, ts: pd.Timestamp, appliances: float) -> None:
         with self._lock:
@@ -52,6 +63,14 @@ class ServingService:
             row_df = pd.DataFrame([raw_row])
             origin_timestamp = self.buffer.last_timestamp
 
+            # Built lazily, only if a requested family actually needs it: a
+            # windowed multi-row feature frame for sequence models
+            # (LSTM/GRU/CNN-LSTM), which — unlike LR/RF — need
+            # required_history_length preceding rows to produce a non-NaN
+            # prediction (SequenceForecaster.predict windows internally via
+            # make_windows(X, L); handing it a single row always yields NaN).
+            windowed_frame = None
+
             results = []
             for family in model_families:
                 bundle = self._bundles.get(family)
@@ -59,10 +78,21 @@ class ServingService:
                     results.append({"model_family": family, "error": "not_available"})
                     continue
 
-                scaled_df = transform_with_scaler(row_df, bundle.scaler, SCALED_COLUMNS)
-                X = scaled_df[bundle.forecaster.required_columns].to_numpy()
+                window_size = bundle.forecaster.required_history_length + 1
+                if window_size > 1:
+                    if windowed_frame is None:
+                        windowed_frame = serving_feature_frame(frame)
+                    window_raw = windowed_frame.tail(window_size)
+                    if not np.isfinite(window_raw.to_numpy(dtype=float)).all():
+                        raise ValueError("serving feature window contains non-finite values")
+                    scaled = transform_with_scaler(window_raw, bundle.scaler, SCALED_COLUMNS)
+                    X = scaled[bundle.forecaster.required_columns].to_numpy()
+                else:
+                    scaled_df = transform_with_scaler(row_df, bundle.scaler, SCALED_COLUMNS)
+                    X = scaled_df[bundle.forecaster.required_columns].to_numpy()
 
-                pred = bundle.forecaster.predict(X)
+                pred_arr = bundle.forecaster.predict(X)
+                pred = pred_arr[-1:]
                 if pred.shape != (1,) or not np.isfinite(pred).all():
                     raise ValueError("forecaster returned an invalid prediction")
 
