@@ -1,0 +1,13 @@
+{
+  "code_sha": "5165fa0d9f9405173e0c606d783493e40b42d7ab",
+  "coef_sha256": "6be51ff222174cc0674d70e97c4b7cfb76340a5d3d89f808fec49b473558f685",
+  "intercept": 115.42186814622801,
+  "model_version": 1,
+  "n_fittable": 15588,
+  "n_lag144_finite": 15594,
+  "n_mask_rows": 15738,
+  "run_id": "0681fa97b2594127870c58cb6ee0abaa",
+  "tracking_store_path": "db/mlflow.db",
+  "train_end": "2016-04-29 23:50:00",
+  "train_start": "2016-01-12 17:00:00"
+}
