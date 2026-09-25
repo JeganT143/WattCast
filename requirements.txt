@@ -9,5 +9,6 @@ matplotlib==3.11.2
 joblib==1.6.0
 pytest==9.1.1
 ipykernel==7.3.0
+streamlit==1.64.0
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch==2.14.0+cpu
