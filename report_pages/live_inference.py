@@ -1,8 +1,7 @@
-"""Live Inference page — relocated verbatim from the original single-page
-streamlit_app.py (Stage: "feat(ui): Streamlit app for comparing all five
-model families live"). Behavior is unchanged: same subprocess-managed
-FastAPI server, same src/ui/client.py calls, same messages and layout —
-only moved into a function so it can be one page among several.
+"""Live Inference page — same underlying logic as the original single-page
+streamlit_app.py (subprocess-managed FastAPI server, src/ui/client.py
+calls, ingest/predict control flow), restyled for a cleaner layout. No
+behavioral change: same API calls, same error handling, same messages.
 """
 
 import time
@@ -10,6 +9,7 @@ import time
 import pandas as pd
 import streamlit as st
 
+from report_pages._style import callout, page_header
 from src.ui.client import (
     ApiClient,
     ApiError,
@@ -22,14 +22,15 @@ from src.ui.client import (
 ALL_FAMILIES = ["linear_regression", "random_forest", "lstm", "gru", "cnn_lstm"]
 
 CAVEAT_BANNER = (
-    "**No model family has been shown to decisively outperform the others.** "
-    "The pre-registered 8-fold walk-forward comparison (DECISIONS.md, \"Phase 5: "
-    "walk-forward run results\") required a deep model (LSTM/GRU/CNN-LSTM) to beat "
-    "each reference (linear_regression, random_forest) on **both** MAE and RMSE "
-    "across all seeds to count as \"shown better\" — all six comparisons came back "
-    "**\"not shown\"** (deep models were consistently better on MAE but worse on "
-    "RMSE than the linear-regression reference). These predictions are shown here "
-    "for side-by-side comparison only, not to declare a winner."
+    "<strong>No model family has been shown to decisively outperform the others.</strong> "
+    "The pre-registered 8-fold walk-forward comparison (DECISIONS.md, "
+    '"Phase 5: walk-forward run results") required a deep model (LSTM/GRU/CNN-LSTM) '
+    "to beat each reference (linear_regression, random_forest) on <strong>both</strong> "
+    'MAE and RMSE across all seeds to count as "shown better" &mdash; all six '
+    'comparisons came back <strong>"not shown"</strong> (deep models were '
+    "consistently better on MAE but worse on RMSE than the linear-regression "
+    "reference). These predictions are shown here for side-by-side comparison "
+    "only, not to declare a winner."
 )
 
 
@@ -60,8 +61,8 @@ def _start_server() -> str:
 
 
 def render() -> None:
-    st.title("WattCast — compare all five model families")
-    st.markdown(CAVEAT_BANNER)
+    page_header("Live Inference", "Ingest a synthetic reading, then compare all five families")
+    callout(CAVEAT_BANNER)
 
     base_url = _start_server()
     ready = wait_for_health(base_url, timeout=2.0)
@@ -76,71 +77,75 @@ def render() -> None:
     health = client.health()
     next_ts = compute_next_timestamp(health)
 
-    st.subheader("1. Ingest a synthetic observation")
-    col1, col2 = st.columns(2)
-    with col1:
-        appliances_value = st.number_input(
-            "Next Appliances value (Wh)", value=60.0, step=1.0
-        )
-    with col2:
-        st.text_input(
-            "Timestamp to ingest at (server-enforced, not editable)",
-            value=str(next_ts),
-            disabled=True,
-        )
-
-    if st.button("Ingest"):
-        try:
-            result = client.ingest(next_ts, appliances_value)
-            st.success(
-                f"Ingested at {result['origin_timestamp']} "
-                f"(buffer {result['have']}/{result['need']})"
+    st.markdown("#### 1 · Ingest a synthetic observation")
+    with st.container(border=True):
+        col1, col2 = st.columns(2)
+        with col1:
+            appliances_value = st.number_input(
+                "Next Appliances value (Wh)", value=60.0, step=1.0
             )
-        except ApiError as e:
-            message = str(e)
-            if "409" in message and "expected_next" in message:
-                st.error(
-                    "That timestamp was already ingested or is out of order. "
-                    "The server's error detail: " + message
+        with col2:
+            st.text_input(
+                "Timestamp to ingest at (server-enforced, not editable)",
+                value=str(next_ts),
+                disabled=True,
+            )
+
+        if st.button("Ingest", type="primary"):
+            try:
+                result = client.ingest(next_ts, appliances_value)
+                st.success(
+                    f"Ingested at {result['origin_timestamp']} "
+                    f"(buffer {result['have']}/{result['need']})"
                 )
+            except ApiError as e:
+                message = str(e)
+                if "409" in message and "expected_next" in message:
+                    st.error(
+                        "That timestamp was already ingested or is out of order. "
+                        "The server's error detail: " + message
+                    )
+                else:
+                    st.error(f"Ingest failed: {message}")
+
+    st.markdown("#### 2 · Predict")
+    with st.container(border=True):
+        selected_families = st.multiselect(
+            "Model families", options=ALL_FAMILIES, default=ALL_FAMILIES
+        )
+
+        if st.button("Predict", type="primary") and selected_families:
+            try:
+                response = client.predict(selected_families)
+            except ApiError as e:
+                message = str(e)
+                if "503" in message:
+                    st.warning(
+                        "Server reports insufficient history to predict yet "
+                        "(should not happen given startup seeding): " + message
+                    )
+                else:
+                    st.error(f"Predict failed: {message}")
             else:
-                st.error(f"Ingest failed: {message}")
+                results = response["results"]
+                ok_results = [r for r in results if "error" not in r]
+                error_results = [r for r in results if "error" in r]
 
-    st.subheader("2. Predict")
-    selected_families = st.multiselect(
-        "Model families", options=ALL_FAMILIES, default=ALL_FAMILIES
-    )
+                if ok_results:
+                    table = pd.DataFrame(
+                        [
+                            {
+                                "model_family": r["model_family"],
+                                "prediction_wh": r["prediction_wh"],
+                                "forecast_timestamp": r["forecast_timestamp"],
+                            }
+                            for r in ok_results
+                        ]
+                    )
+                    display_table = table.copy()
+                    display_table["prediction_wh"] = display_table["prediction_wh"].round(2)
+                    st.dataframe(display_table, hide_index=True, use_container_width=True)
+                    st.bar_chart(table.set_index("model_family")["prediction_wh"])
 
-    if st.button("Predict") and selected_families:
-        try:
-            response = client.predict(selected_families)
-        except ApiError as e:
-            message = str(e)
-            if "503" in message:
-                st.warning(
-                    "Server reports insufficient history to predict yet "
-                    "(should not happen given startup seeding): " + message
-                )
-            else:
-                st.error(f"Predict failed: {message}")
-        else:
-            results = response["results"]
-            ok_results = [r for r in results if "error" not in r]
-            error_results = [r for r in results if "error" in r]
-
-            if ok_results:
-                table = pd.DataFrame(
-                    [
-                        {
-                            "model_family": r["model_family"],
-                            "prediction_wh": r["prediction_wh"],
-                            "forecast_timestamp": r["forecast_timestamp"],
-                        }
-                        for r in ok_results
-                    ]
-                )
-                st.dataframe(table, hide_index=True)
-                st.bar_chart(table.set_index("model_family")["prediction_wh"])
-
-            for r in error_results:
-                st.warning(f"{r['model_family']}: not available ({r['error']})")
+                for r in error_results:
+                    st.warning(f"{r['model_family']}: not available ({r['error']})")

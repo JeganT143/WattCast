@@ -18,15 +18,21 @@ or displayed.
 import streamlit as st
 
 from report_pages import data_features, limitations, live_inference, model_comparison, overview
+from report_pages._style import inject_base_styles
 
 st.set_page_config(page_title="WattCast project report", layout="centered")
+inject_base_styles()
+
+with st.sidebar:
+    st.markdown("### WattCast")
+    st.caption("Appliance energy forecasting — project report")
 
 pages = [
-    st.Page(overview.render, title="Overview", default=True),
-    st.Page(data_features.render, title="Data & Features"),
-    st.Page(model_comparison.render, title="Model Comparison"),
-    st.Page(live_inference.render, title="Live Inference"),
-    st.Page(limitations.render, title="Limitations & Design"),
+    st.Page(overview.render, title="Overview", url_path="overview", default=True),
+    st.Page(data_features.render, title="Data & Features", url_path="data-features"),
+    st.Page(model_comparison.render, title="Model Comparison", url_path="model-comparison"),
+    st.Page(live_inference.render, title="Live Inference", url_path="live-inference"),
+    st.Page(limitations.render, title="Limitations & Design", url_path="limitations-design"),
 ]
 
 navigation = st.navigation(pages)
