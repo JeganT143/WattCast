@@ -12,6 +12,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from src.data.purge import trailing_ineligible_count
 from src.evaluation.context import (
     audit_leading_nans,
     drop_context_predictions,
@@ -136,14 +137,8 @@ def evaluate_forecaster(
                 f"{partition} contains non-finite labels; only train may contain purged (NaN) labels"
             )
 
-    ineligible = ~np.isfinite(y["train"])
-    n_inel = int(ineligible.sum())
-    n_train = len(ineligible)
-    if n_inel > 0 and not ineligible[n_train - n_inel :].all():
-        raise ValueError(
-            "non-finite train labels must form a trailing block; a non-trailing gap "
-            "would open a hole inside sequence windows"
-        )
+    n_inel = trailing_ineligible_count(y["train"])
+    n_train = len(y["train"])
 
     k = forecaster.required_history_length
     if k + n_inel >= n_train:

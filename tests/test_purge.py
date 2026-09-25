@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.data.purge import mask_ineligible_labels
+from src.data.purge import mask_ineligible_labels, trailing_ineligible_count
 
 STEP = pd.Timedelta(minutes=10)
 BOUNDARY = pd.Timestamp("2016-04-18")
@@ -67,3 +67,48 @@ def test_partition_far_from_the_boundary_is_unchanged():
 def test_non_positive_horizon_raises(bad):
     with pytest.raises(ValueError, match="horizon"):
         mask_ineligible_labels(_train_like(), "target", bad, BOUNDARY)
+
+
+def test_trailing_ineligible_count_all_finite_returns_zero():
+    y = np.arange(10, dtype=float)
+    assert trailing_ineligible_count(y) == 0
+
+
+def test_trailing_ineligible_count_trailing_nan_block_returns_its_length():
+    y = np.concatenate([np.arange(10, dtype=float), np.full(6, np.nan)])
+    assert trailing_ineligible_count(y) == 6
+
+
+def test_trailing_ineligible_count_trailing_block_mixing_nan_and_inf_returns_its_length():
+    y = np.concatenate(
+        [np.arange(10, dtype=float), np.array([np.nan, np.inf, -np.inf, np.nan])]
+    )
+    assert trailing_ineligible_count(y) == 4
+
+
+def test_trailing_ineligible_count_all_nan_array_returns_its_length():
+    y = np.full(10, np.nan)
+    assert trailing_ineligible_count(y) == 10
+
+
+def test_trailing_ineligible_count_empty_array_returns_zero():
+    y = np.array([], dtype=float)
+    assert trailing_ineligible_count(y) == 0
+
+
+def test_trailing_ineligible_count_nan_in_middle_with_finite_rows_after_raises_trailing():
+    y = np.array([1.0, 2.0, np.nan, 4.0, 5.0])
+    with pytest.raises(ValueError, match="trailing"):
+        trailing_ineligible_count(y)
+
+
+def test_trailing_ineligible_count_nan_in_middle_with_finite_rows_after_raises_non_finite():
+    y = np.array([1.0, 2.0, np.nan, 4.0, 5.0])
+    with pytest.raises(ValueError, match="non-finite"):
+        trailing_ineligible_count(y)
+
+
+def test_trailing_ineligible_count_leading_nan_followed_by_finite_rows_raises():
+    y = np.array([np.nan, 1.0, 2.0, 3.0])
+    with pytest.raises(ValueError):
+        trailing_ineligible_count(y)
