@@ -4,10 +4,13 @@ and remains the script that produced the already-registered LR champion
 (DECISIONS.md "Phase 6: serving registration, 2026-09-25" and "Phase 6:
 per-fold selection evidence, 2026-09-25").
 
-ALLOWED_FAMILIES is exactly {"random_forest"} in this stage. linear_regression
+ALLOWED_FAMILIES is {"random_forest", "lstm"} in this stage. linear_regression
 is explicitly excluded — it is already registered via the original script,
 and re-running it here would risk silently producing a second, divergent LR
-run. Deep sequence-model families (lstm/gru/cnn_lstm) are a later stage.
+run. gru and cnn_lstm are deliberately deferred to a follow-up: the shared
+SequenceForecaster packaging/loading mechanism is verified once against
+LSTM here before being reapplied to them (DECISIONS.md "Phase 6: deep-model
+final deployment decision, 2026-09-25").
 """
 
 import argparse
@@ -23,13 +26,19 @@ from mlflow.tracking import MlflowClient
 from config.features import FEATURE_COLUMNS, SCALED_COLUMNS
 from config.mlflow_config import TRACKING_URI
 from config.paths import PROJECT_ROOT, RAW_DATA_PATH
+from src.evaluation.walk_forward_models import HUBER_DELTA, LSTM_MAX_EPOCHS
+from src.models.lstm import LSTMForecaster
 from src.models.sklearn_models import RandomForestForecaster
-from src.serving.bundle import ModelBundle, feature_schema_version, required_raw_history, save_bundle
+from src.serving.bundle import ModelBundle, feature_schema_version, save_bundle
+from src.serving.bundle import required_raw_history as lr_rf_required_raw_history
+from src.serving.buffer import SEQUENCE_MODEL_RAW_HISTORY
 from src.serving.registry import CHAMPION_ALIAS, register_bundle, registered_model_name
 from src.training.final_window import build_final_window
 
 HORIZON = 6
-ALLOWED_FAMILIES = {"random_forest"}
+SEED = 42  # DECISIONS.md "Phase 6: deep-model final deployment decision, 2026-09-25"
+ALLOWED_FAMILIES = {"random_forest", "lstm"}
+SEQUENCE_FAMILIES = {"lstm"}
 SCALER_CONVENTION = (
     "StandardScaler fit on the untrimmed final-window feature frame "
     "(date < 2016-04-30), all rows True"
@@ -38,6 +47,17 @@ SEED_END = "2016-04-29 23:50:00"
 
 _FORECASTER_FACTORIES = {
     "random_forest": RandomForestForecaster,
+    # L, hidden_size, num_layers, dropout, learning_rate, batch_size,
+    # torch_num_threads are deliberately NOT passed here: they have no
+    # separate named constant anywhere in the repo for Phase 4/5 (the
+    # walk-forward factories in src/evaluation/walk_forward_models.py
+    # never override them either), so the existing SequenceForecaster
+    # class defaults ARE the source of truth. Retyping them here would be
+    # the config-drift risk DECISIONS.md warned against; omitting them
+    # reuses the exact same defaults Phase 4/5 relied on. Only
+    # max_epochs/huber_delta (LSTM_MAX_EPOCHS/HUBER_DELTA, imported above)
+    # and seed (a fresh, distinct 42 for this final run) are provided.
+    "lstm": lambda: LSTMForecaster(max_epochs=LSTM_MAX_EPOCHS, huber_delta=HUBER_DELTA, seed=SEED),
 }
 
 
@@ -108,6 +128,7 @@ def main(
     code_sha = _get_git_commit_sha()
     train_start = str(window.first_date)
     train_end = str(window.last_date)
+    is_sequence_family = family in SEQUENCE_FAMILIES
 
     schema = {
         "model_family": family,
@@ -115,7 +136,9 @@ def main(
         "feature_columns": FEATURE_COLUMNS,
         "scaled_columns": SCALED_COLUMNS,
         "required_columns": forecaster.required_columns,
-        "required_raw_history": required_raw_history(),
+        "required_raw_history": (
+            SEQUENCE_MODEL_RAW_HISTORY if is_sequence_family else lr_rf_required_raw_history()
+        ),
         "train_start": train_start,
         "train_end": train_end,
         "seed_end": SEED_END,
@@ -124,6 +147,20 @@ def main(
         "code_sha": code_sha,
         "feature_schema_version": feature_schema_version(FEATURE_COLUMNS),
     }
+
+    if is_sequence_family:
+        # Sourced entirely from the fitted instance itself (forecaster.params,
+        # the existing SequenceForecaster source of truth for its own
+        # constructor args) — never retyped literals, so this can't drift
+        # from what was actually built and trained.
+        schema["architecture"] = {
+            "class": type(forecaster._net).__name__,
+            "n_features": len(forecaster.required_columns),
+            "params": forecaster.params,
+        }
+        schema["seed"] = forecaster.seed
+        schema["epochs"] = forecaster.max_epochs
+
     bundle = ModelBundle(forecaster=forecaster, scaler=window.scaler, schema=schema)
 
     with tempfile.TemporaryDirectory() as tmp_dir:
@@ -144,6 +181,9 @@ def main(
             ),
             "test_partition_used": "false",
         }
+        if is_sequence_family:
+            tags["seed"] = schema["seed"]
+            tags["epochs"] = schema["epochs"]
         run_id, model_version = register_bundle(
             bundle_dir, tracking_uri, tags=tags, family=family
         )
@@ -166,6 +206,9 @@ def main(
         "train_end": train_end,
         "tracking_store_path": tracking_store_relative,
     }
+    if is_sequence_family:
+        payload["seed"] = schema["seed"]
+        payload["epochs"] = schema["epochs"]
 
     results_path.parent.mkdir(parents=True, exist_ok=True)
     with open(results_path, "w") as f:

@@ -20,11 +20,20 @@ from pathlib import Path
 from typing import Callable
 
 import skops.io as sio
+import torch
 from sklearn.preprocessing import StandardScaler
 
 from config.features import FEATURE_COLUMNS, LAG_STEPS, ROLLING_WINDOWS, SCALED_COLUMNS
 from src.models.forecaster import Forecaster
+from src.models.lstm import LSTMForecaster
 from src.models.sklearn_models import LinearRegressionForecaster, RandomForestForecaster
+
+# Sequence-model families serialize via torch state_dict + architecture
+# reconstruction (below), never via skops — deliberately a separate path
+# from the sklearn estimators' skops serialization. Only "lstm" so far;
+# gru/cnn_lstm are deferred to a follow-up (DECISIONS.md "Phase 6:
+# deep-model final deployment decision, 2026-09-25").
+_SEQUENCE_FAMILIES = {"lstm"}
 
 
 def required_raw_history(
@@ -79,10 +88,22 @@ def _load_skops_trusted(path: Path, trusted: list[str] | None = None):
     return sio.load(path, trusted=trusted)
 
 
+def _save_torch_state(forecaster, path: Path) -> None:
+    """Saves only the trained network's state_dict — never the whole Forecaster
+    object, never pickle. Mirrors the "never pickle" discipline of the skops
+    path used for the sklearn-based families."""
+    torch.save(forecaster._net.state_dict(), path)
+
+
 def save_bundle(bundle: ModelBundle, directory: Path) -> None:
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
-    _dump_skops(bundle.forecaster.model, directory / "estimator.skops")
+
+    if bundle.schema["model_family"] in _SEQUENCE_FAMILIES:
+        _save_torch_state(bundle.forecaster, directory / "model_state.pt")
+    else:
+        _dump_skops(bundle.forecaster.model, directory / "estimator.skops")
+
     _dump_skops(bundle.scaler, directory / "scaler.skops")
     with open(directory / "schema.json", "w") as f:
         json.dump(bundle.schema, f, indent=2, sort_keys=True)
@@ -110,9 +131,28 @@ def _load_random_forest(directory: Path, schema: dict) -> Forecaster:
     return forecaster
 
 
+def _load_lstm(directory: Path, schema: dict) -> Forecaster:
+    """Never touches skops: reconstructs the forecaster from its recorded
+    constructor params (schema["architecture"]["params"], the same values
+    that produced the trained network — sourced from forecaster.params,
+    the existing source of truth), builds an empty network via the
+    forecaster's own _build_network, then loads the saved state_dict into
+    it. This is the same way a fitted SequenceForecaster normally holds
+    its trained network (self._net), not a guess."""
+    architecture = schema["architecture"]
+    forecaster = LSTMForecaster(**architecture["params"])
+    net = forecaster._build_network(architecture["n_features"])
+    state_dict = torch.load(directory / "model_state.pt", weights_only=True)
+    net.load_state_dict(state_dict)
+    net.eval()
+    forecaster._net = net
+    return forecaster
+
+
 LOADERS: dict[str, Callable[[Path, dict], Forecaster]] = {
     "linear_regression": _load_linear_regression,
     "random_forest": _load_random_forest,
+    "lstm": _load_lstm,
 }
 
 

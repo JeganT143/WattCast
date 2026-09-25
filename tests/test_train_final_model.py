@@ -107,3 +107,62 @@ def test_load_champion_linear_regression_unaffected_by_signature_change():
     n_cols = len(old_bundle.forecaster.required_columns)
     X = np.linspace(-1, 1, num=5 * n_cols).reshape(5, n_cols)
     assert np.array_equal(old_bundle.forecaster.predict(X), new_bundle.forecaster.predict(X))
+
+
+def _synthetic_raw_for_lstm(n_rows: int = 250) -> pd.DataFrame:
+    return _synthetic_raw(n_rows)
+
+
+def test_family_lstm_end_to_end_produces_registered_bundle(tmp_path):
+    tracking_uri = f"sqlite:///{tmp_path / 'mlflow.db'}"
+    artifact_location = str(tmp_path / "artifacts")
+    client = MlflowClient(tracking_uri=tracking_uri)
+    client.create_experiment(EXPERIMENT_NAME, artifact_location=artifact_location)
+
+    results_path = tmp_path / "final_model_registration_lstm.json"
+
+    payload = train_final_model.main(
+        family="lstm",
+        results_path=results_path,
+        tracking_uri=tracking_uri,
+        df_raw=_synthetic_raw_for_lstm(),
+    )
+
+    assert results_path.exists()
+    assert payload["model_family"] == "lstm"
+    assert payload["seed"] == 42
+    assert payload["epochs"] == train_final_model.LSTM_MAX_EPOCHS
+
+    champion = load_champion(tracking_uri, family="lstm")
+    assert champion.schema["model_family"] == "lstm"
+    assert champion.schema["seed"] == 42
+    assert champion.schema["epochs"] == train_final_model.LSTM_MAX_EPOCHS
+
+    # (e) reconstruction must not silently hardcode required_history_length /
+    # required_columns wrong: compare against what SequenceForecaster/
+    # LSTMForecaster themselves report for the exact same construction params.
+    from src.models.lstm import LSTMForecaster
+
+    fresh = LSTMForecaster(**champion.schema["architecture"]["params"])
+    assert champion.forecaster.required_history_length == fresh.required_history_length
+    assert champion.forecaster.required_columns == fresh.required_columns
+
+
+def test_family_gru_still_refuses_in_this_stage():
+    with pytest.raises(ValueError, match="gru"):
+        train_final_model.check_can_run(
+            "gru", results_path=None, tracking_uri="sqlite:///unused.db"
+        )
+    assert "gru" not in train_final_model.ALLOWED_FAMILIES
+
+
+def test_family_cnn_lstm_still_refuses_in_this_stage():
+    with pytest.raises(ValueError, match="cnn_lstm"):
+        train_final_model.check_can_run(
+            "cnn_lstm", results_path=None, tracking_uri="sqlite:///unused.db"
+        )
+    assert "cnn_lstm" not in train_final_model.ALLOWED_FAMILIES
+
+
+def test_allowed_families_is_exactly_random_forest_and_lstm():
+    assert train_final_model.ALLOWED_FAMILIES == {"random_forest", "lstm"}
