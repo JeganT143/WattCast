@@ -1,0 +1,131 @@
+"""Thin FastAPI adapter over ServingService (DECISIONS.md "Phase 6: serving
+registration, 2026-09-25"). Routes depend only on ServingService and the
+Forecaster interface via its bundle's schema dict — there is no model
+class, model path, or model_family branching here.
+
+Importing this module must not load anything: the champion, the raw
+history, and the rolling buffer are all constructed lazily inside the
+app's lifespan, never at import time.
+"""
+
+import math
+from collections.abc import Callable
+from contextlib import asynccontextmanager
+from datetime import datetime
+from typing import Any
+
+import pandas as pd
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+from mlflow.tracking import MlflowClient
+from pydantic import BaseModel
+
+from config.mlflow_config import TRACKING_URI
+from config.paths import RAW_DATA_PATH
+from src.serving.bundle import ModelBundle
+from src.serving.buffer import (
+    DuplicateTimestampError,
+    InsufficientHistoryError,
+    NonSuccessorTimestampError,
+    required_raw_history,
+    seed_buffer,
+)
+from src.serving.registry import CHAMPION_ALIAS, REGISTERED_MODEL_NAME, load_champion
+from src.serving.service import ServingService
+
+
+class PredictRequest(BaseModel):
+    timestamp: datetime
+    appliances: float
+
+
+def _default_load() -> ServingService:
+    bundle = load_champion(TRACKING_URI)
+    client = MlflowClient(tracking_uri=TRACKING_URI)
+    model_version = client.get_model_version_by_alias(REGISTERED_MODEL_NAME, CHAMPION_ALIAS).version
+    bundle = ModelBundle(
+        forecaster=bundle.forecaster,
+        scaler=bundle.scaler,
+        schema={**bundle.schema, "model_version": int(model_version)},
+    )
+
+    raw = pd.read_csv(RAW_DATA_PATH, parse_dates=["date"])
+    buffer = seed_buffer(raw, required_raw_history(), bundle.schema["seed_end"])
+    return ServingService(bundle, buffer)
+
+
+def create_app(load: Callable[[], ServingService] = _default_load) -> FastAPI:
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        app.state.service = load()
+        yield
+
+    app = FastAPI(lifespan=lifespan)
+
+    @app.post("/predict")
+    async def predict(payload: PredictRequest, request: Request) -> Any:
+        service: ServingService = request.app.state.service
+
+        timestamp = payload.timestamp
+        if timestamp.tzinfo is not None:
+            return JSONResponse(
+                status_code=422,
+                content={"status": "invalid_timestamp", "detail": "timestamp must be timezone-naive"},
+            )
+        if not math.isfinite(payload.appliances):
+            return JSONResponse(
+                status_code=422,
+                content={"status": "invalid_appliances", "detail": "appliances must be finite"},
+            )
+
+        try:
+            result = service.predict(pd.Timestamp(timestamp), payload.appliances)
+        except DuplicateTimestampError as e:
+            return JSONResponse(
+                status_code=409,
+                content={"status": "duplicate", "timestamp": str(e.timestamp)},
+            )
+        except NonSuccessorTimestampError as e:
+            return JSONResponse(
+                status_code=409,
+                content={"status": "non_successor", "expected_next": str(e.expected_next)},
+            )
+        except InsufficientHistoryError as e:
+            return JSONResponse(
+                status_code=503,
+                content={"status": "insufficient_history", "have": e.have, "need": e.need},
+            )
+
+        schema = service.bundle.schema
+        return {
+            "origin_timestamp": result.origin_timestamp.isoformat(),
+            "forecast_timestamp": result.forecast_timestamp.isoformat(),
+            "prediction_wh": result.prediction_wh,
+            "horizon_steps": schema["horizon"],
+            "model_family": schema["model_family"],
+            "model_version": schema["model_version"],
+        }
+
+    @app.get("/health")
+    async def health(request: Request) -> Any:
+        service: ServingService = request.app.state.service
+        schema = service.bundle.schema
+        last = service.buffer.last_timestamp
+        return {
+            "model_family": schema["model_family"],
+            "model_version": schema["model_version"],
+            "horizon": schema["horizon"],
+            "buffer_end": last.isoformat() if last is not None else None,
+            "ready": service.buffer.is_ready,
+            "required_raw_history": service.buffer.capacity,
+        }
+
+    @app.get("/model")
+    async def model(request: Request) -> Any:
+        service: ServingService = request.app.state.service
+        return dict(service.bundle.schema)
+
+    return app
+
+
+app = create_app()
