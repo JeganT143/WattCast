@@ -2,7 +2,12 @@
 model families (DECISIONS.md "Phase 6: deep-model final deployment
 decision, 2026-09-25"). Deliberately separate from the skops path used by
 the sklearn-based families (linear_regression, random_forest) — these
-tests confirm that separation, not just that loading "works"."""
+tests confirm that separation, not just that loading "works".
+
+Parametrized across all three sequence families (lstm, gru, cnn_lstm): the
+mechanism (state_dict + architecture reconstruction) is shared, but each
+family gets its own genuine bit-exact round trip and prediction-equality
+check rather than inferring correctness from LSTM's tests passing."""
 
 from unittest.mock import patch
 
@@ -13,15 +18,24 @@ import torch
 from sklearn.preprocessing import StandardScaler
 
 from config.features import FEATURE_COLUMNS, SCALED_COLUMNS
+from src.models.cnn_lstm import CNNLSTMForecaster
+from src.models.gru import GRUForecaster
 from src.models.lstm import LSTMForecaster
 from src.serving.bundle import ModelBundle, load_bundle, save_bundle
 
 N_FEATURES = 16
 L = 4
 
+_FAMILY_CLASSES = {
+    "lstm": LSTMForecaster,
+    "gru": GRUForecaster,
+    "cnn_lstm": CNNLSTMForecaster,
+}
 
-def _tiny_forecaster(seed: int = 0) -> LSTMForecaster:
-    forecaster = LSTMForecaster(
+
+def _tiny_forecaster(family: str, seed: int = 0):
+    cls = _FAMILY_CLASSES[family]
+    forecaster = cls(
         max_epochs=2,
         huber_delta=40.0,
         seed=seed,
@@ -39,10 +53,10 @@ def _tiny_forecaster(seed: int = 0) -> LSTMForecaster:
     return forecaster
 
 
-def _tiny_bundle(seed: int = 0) -> ModelBundle:
-    forecaster = _tiny_forecaster(seed)
+def _tiny_bundle(family: str, seed: int = 0) -> ModelBundle:
+    forecaster = _tiny_forecaster(family, seed)
     schema = {
-        "model_family": "lstm",
+        "model_family": family,
         "feature_columns": FEATURE_COLUMNS,
         "scaled_columns": SCALED_COLUMNS,
         "architecture": {
@@ -58,8 +72,9 @@ def _tiny_bundle(seed: int = 0) -> ModelBundle:
     return ModelBundle(forecaster=forecaster, scaler=scaler, schema=schema)
 
 
-def test_torch_state_dict_round_trip_bit_exact(tmp_path):
-    bundle = _tiny_bundle()
+@pytest.mark.parametrize("family", ["lstm", "gru", "cnn_lstm"])
+def test_torch_state_dict_round_trip_bit_exact(tmp_path, family):
+    bundle = _tiny_bundle(family)
     directory = tmp_path / "bundle"
     save_bundle(bundle, directory)
 
@@ -73,8 +88,9 @@ def test_torch_state_dict_round_trip_bit_exact(tmp_path):
         assert torch.equal(original_state[key], loaded_state[key]), key
 
 
-def test_torch_predictions_bit_identical_after_round_trip(tmp_path):
-    bundle = _tiny_bundle()
+@pytest.mark.parametrize("family", ["lstm", "gru", "cnn_lstm"])
+def test_torch_predictions_bit_identical_after_round_trip(tmp_path, family):
+    bundle = _tiny_bundle(family)
     directory = tmp_path / "bundle"
     save_bundle(bundle, directory)
     loaded = load_bundle(directory)
@@ -88,8 +104,9 @@ def test_torch_predictions_bit_identical_after_round_trip(tmp_path):
     assert np.array_equal(original_preds, loaded_preds, equal_nan=True)
 
 
-def test_load_bundle_for_lstm_never_touches_skops_for_the_model(tmp_path):
-    bundle = _tiny_bundle()
+@pytest.mark.parametrize("family", ["lstm", "gru", "cnn_lstm"])
+def test_load_bundle_never_touches_skops_for_the_model(tmp_path, family):
+    bundle = _tiny_bundle(family)
     directory = tmp_path / "bundle"
     save_bundle(bundle, directory)
 
@@ -109,8 +126,9 @@ def test_load_bundle_for_lstm_never_touches_skops_for_the_model(tmp_path):
     assert any("scaler" in c for c in calls), "the scaler is expected to still use skops"
 
 
-def test_loaded_lstm_required_history_and_columns_match_pre_serialization(tmp_path):
-    bundle = _tiny_bundle()
+@pytest.mark.parametrize("family", ["lstm", "gru", "cnn_lstm"])
+def test_loaded_required_history_and_columns_match_pre_serialization(tmp_path, family):
+    bundle = _tiny_bundle(family)
     directory = tmp_path / "bundle"
     save_bundle(bundle, directory)
     loaded = load_bundle(directory)
@@ -120,11 +138,29 @@ def test_loaded_lstm_required_history_and_columns_match_pre_serialization(tmp_pa
     assert loaded.forecaster.L == bundle.forecaster.L
 
 
-def test_load_bundle_raises_without_model_state_file_for_lstm(tmp_path):
-    bundle = _tiny_bundle()
+@pytest.mark.parametrize("family", ["lstm", "gru", "cnn_lstm"])
+def test_load_bundle_raises_without_model_state_file(tmp_path, family):
+    bundle = _tiny_bundle(family)
     directory = tmp_path / "bundle"
     save_bundle(bundle, directory)
     (directory / "model_state.pt").unlink()
 
     with pytest.raises(FileNotFoundError):
         load_bundle(directory)
+
+
+def test_cnn_lstm_architecture_params_includes_conv_fields_not_accepted_by_constructor():
+    """Documents the one real difference from LSTM/GRU: CNNLSTMForecaster.params
+    (used verbatim as schema["architecture"]["params"]) includes conv_channels/
+    conv_kernel_size/conv_padding/conv_activation, which SequenceForecaster.__init__
+    does not accept as keyword arguments (they are module-level constants in
+    cnn_lstm.py, not per-instance configurable). The bundle loader must filter
+    these out before reconstructing the forecaster; naively splatting
+    schema["architecture"]["params"] into the constructor raises TypeError."""
+    forecaster = _tiny_forecaster("cnn_lstm")
+    params = forecaster.params
+    for extra_key in ("conv_channels", "conv_kernel_size", "conv_padding", "conv_activation"):
+        assert extra_key in params
+
+    with pytest.raises(TypeError):
+        CNNLSTMForecaster(**params)

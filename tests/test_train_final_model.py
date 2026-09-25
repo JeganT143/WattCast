@@ -1,9 +1,11 @@
 """Tests for scripts/train_final_model.py, the generalized (multi-family)
 successor to scripts/train_final_lr.py (DECISIONS.md "Phase 6: serving
 registration, 2026-09-25"). linear_regression is excluded here — it is
-already registered via the original script — and only "random_forest"
-is allowed in this stage; deep sequence-model families are a later stage.
+already registered via the original script. random_forest, lstm, gru, and
+cnn_lstm are all supported in this stage.
 """
+
+import inspect
 
 import numpy as np
 import pandas as pd
@@ -41,9 +43,9 @@ def test_family_unsupported_refuses_no_mlflow_call(monkeypatch):
 
     monkeypatch.setattr(train_final_model, "MlflowClient", _boom)
 
-    with pytest.raises(ValueError, match="cnn_lstm"):
+    with pytest.raises(ValueError, match="xgboost"):
         train_final_model.check_can_run(
-            "cnn_lstm", results_path=None, tracking_uri="sqlite:///unused.db"
+            "xgboost", results_path=None, tracking_uri="sqlite:///unused.db"
         )
 
 
@@ -148,21 +150,54 @@ def test_family_lstm_end_to_end_produces_registered_bundle(tmp_path):
     assert champion.forecaster.required_columns == fresh.required_columns
 
 
-def test_family_gru_still_refuses_in_this_stage():
-    with pytest.raises(ValueError, match="gru"):
-        train_final_model.check_can_run(
-            "gru", results_path=None, tracking_uri="sqlite:///unused.db"
-        )
-    assert "gru" not in train_final_model.ALLOWED_FAMILIES
+def test_allowed_families_is_random_forest_and_all_sequence_families():
+    assert train_final_model.ALLOWED_FAMILIES == {
+        "random_forest",
+        "lstm",
+        "gru",
+        "cnn_lstm",
+    }
 
 
-def test_family_cnn_lstm_still_refuses_in_this_stage():
-    with pytest.raises(ValueError, match="cnn_lstm"):
-        train_final_model.check_can_run(
-            "cnn_lstm", results_path=None, tracking_uri="sqlite:///unused.db"
-        )
-    assert "cnn_lstm" not in train_final_model.ALLOWED_FAMILIES
+@pytest.mark.parametrize("family", ["gru", "cnn_lstm"])
+def test_family_sequence_end_to_end_produces_registered_bundle(tmp_path, family):
+    tracking_uri = f"sqlite:///{tmp_path / 'mlflow.db'}"
+    artifact_location = str(tmp_path / "artifacts")
+    client = MlflowClient(tracking_uri=tracking_uri)
+    client.create_experiment(EXPERIMENT_NAME, artifact_location=artifact_location)
 
+    results_path = tmp_path / f"final_model_registration_{family}.json"
 
-def test_allowed_families_is_exactly_random_forest_and_lstm():
-    assert train_final_model.ALLOWED_FAMILIES == {"random_forest", "lstm"}
+    payload = train_final_model.main(
+        family=family,
+        results_path=results_path,
+        tracking_uri=tracking_uri,
+        df_raw=_synthetic_raw(),
+    )
+
+    assert results_path.exists()
+    assert payload["model_family"] == family
+    assert payload["seed"] == 42
+    assert payload["epochs"] == train_final_model.LSTM_MAX_EPOCHS
+
+    champion = load_champion(tracking_uri, family=family)
+    assert champion.schema["model_family"] == family
+    assert champion.schema["seed"] == 42
+    assert champion.schema["epochs"] == train_final_model.LSTM_MAX_EPOCHS
+
+    # (e) reconstruction must not silently hardcode required_history_length /
+    # required_columns wrong: compare against a fresh instance of the same
+    # class built from the constructor-accepted subset of the recorded
+    # architecture params (mirrors what the generic bundle loader itself
+    # does — CNNLSTMForecaster.params includes extra conv_* fields that its
+    # own __init__ does not accept as keyword arguments).
+    from src.serving.bundle import _SEQUENCE_FORECASTER_CLASSES
+
+    cls = _SEQUENCE_FORECASTER_CLASSES[family]
+    ctor_params = inspect.signature(cls.__init__).parameters
+    filtered = {
+        k: v for k, v in champion.schema["architecture"]["params"].items() if k in ctor_params
+    }
+    fresh = cls(**filtered)
+    assert champion.forecaster.required_history_length == fresh.required_history_length
+    assert champion.forecaster.required_columns == fresh.required_columns

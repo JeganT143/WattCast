@@ -14,6 +14,7 @@ buffer.py imports it from here rather than redefining it.
 """
 
 import hashlib
+import inspect
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,16 +25,33 @@ import torch
 from sklearn.preprocessing import StandardScaler
 
 from config.features import FEATURE_COLUMNS, LAG_STEPS, ROLLING_WINDOWS, SCALED_COLUMNS
+from src.models.cnn_lstm import CNNLSTMForecaster
 from src.models.forecaster import Forecaster
+from src.models.gru import GRUForecaster
 from src.models.lstm import LSTMForecaster
 from src.models.sklearn_models import LinearRegressionForecaster, RandomForestForecaster
 
 # Sequence-model families serialize via torch state_dict + architecture
 # reconstruction (below), never via skops — deliberately a separate path
-# from the sklearn estimators' skops serialization. Only "lstm" so far;
-# gru/cnn_lstm are deferred to a follow-up (DECISIONS.md "Phase 6:
-# deep-model final deployment decision, 2026-09-25").
-_SEQUENCE_FAMILIES = {"lstm"}
+# from the sklearn estimators' skops serialization.
+_SEQUENCE_FAMILIES = {"lstm", "gru", "cnn_lstm"}
+
+# One entry per sequence family, used by the single generic loader below.
+# CNNLSTMForecaster.params (schema["architecture"]["params"]) includes
+# conv_channels/conv_kernel_size/conv_padding/conv_activation, which are
+# module-level constants in cnn_lstm.py, not constructor keyword arguments
+# — SequenceForecaster.__init__ has no **kwargs, so splatting those extra
+# keys directly into the constructor raises TypeError. The loader filters
+# schema["architecture"]["params"] down to the keys the class's own
+# __init__ actually accepts (via inspect.signature) before constructing,
+# which keeps LSTM/GRU behavior unchanged (all their params keys are
+# already constructor-accepted) while making CNN-LSTM reconstruct
+# correctly, without needing a family-specific loader function.
+_SEQUENCE_FORECASTER_CLASSES: dict[str, type] = {
+    "lstm": LSTMForecaster,
+    "gru": GRUForecaster,
+    "cnn_lstm": CNNLSTMForecaster,
+}
 
 
 def required_raw_history(
@@ -131,16 +149,23 @@ def _load_random_forest(directory: Path, schema: dict) -> Forecaster:
     return forecaster
 
 
-def _load_lstm(directory: Path, schema: dict) -> Forecaster:
+def _load_sequence_forecaster(directory: Path, schema: dict) -> Forecaster:
     """Never touches skops: reconstructs the forecaster from its recorded
     constructor params (schema["architecture"]["params"], the same values
     that produced the trained network — sourced from forecaster.params,
     the existing source of truth), builds an empty network via the
     forecaster's own _build_network, then loads the saved state_dict into
     it. This is the same way a fitted SequenceForecaster normally holds
-    its trained network (self._net), not a guess."""
+    its trained network (self._net), not a guess. Shared verbatim by
+    lstm/gru/cnn_lstm: params are filtered to the keys the target class's
+    own __init__ accepts, so a family whose params property records extra
+    non-constructor fields (cnn_lstm's conv_* constants) still reconstructs
+    correctly without a family-specific loader."""
     architecture = schema["architecture"]
-    forecaster = LSTMForecaster(**architecture["params"])
+    cls = _SEQUENCE_FORECASTER_CLASSES[schema["model_family"]]
+    ctor_params = inspect.signature(cls.__init__).parameters
+    params = {k: v for k, v in architecture["params"].items() if k in ctor_params}
+    forecaster = cls(**params)
     net = forecaster._build_network(architecture["n_features"])
     state_dict = torch.load(directory / "model_state.pt", weights_only=True)
     net.load_state_dict(state_dict)
@@ -152,7 +177,9 @@ def _load_lstm(directory: Path, schema: dict) -> Forecaster:
 LOADERS: dict[str, Callable[[Path, dict], Forecaster]] = {
     "linear_regression": _load_linear_regression,
     "random_forest": _load_random_forest,
-    "lstm": _load_lstm,
+    "lstm": _load_sequence_forecaster,
+    "gru": _load_sequence_forecaster,
+    "cnn_lstm": _load_sequence_forecaster,
 }
 
 

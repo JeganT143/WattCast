@@ -4,13 +4,12 @@ and remains the script that produced the already-registered LR champion
 (DECISIONS.md "Phase 6: serving registration, 2026-09-25" and "Phase 6:
 per-fold selection evidence, 2026-09-25").
 
-ALLOWED_FAMILIES is {"random_forest", "lstm"} in this stage. linear_regression
+ALLOWED_FAMILIES is {"random_forest", "lstm", "gru", "cnn_lstm"}. linear_regression
 is explicitly excluded — it is already registered via the original script,
 and re-running it here would risk silently producing a second, divergent LR
-run. gru and cnn_lstm are deliberately deferred to a follow-up: the shared
-SequenceForecaster packaging/loading mechanism is verified once against
-LSTM here before being reapplied to them (DECISIONS.md "Phase 6: deep-model
-final deployment decision, 2026-09-25").
+run. The shared SequenceForecaster packaging/loading mechanism was verified
+once against LSTM, then reapplied to gru and cnn_lstm (DECISIONS.md "Phase 6:
+deep-model final deployment decision, 2026-09-25").
 """
 
 import argparse
@@ -27,6 +26,8 @@ from config.features import FEATURE_COLUMNS, SCALED_COLUMNS
 from config.mlflow_config import TRACKING_URI
 from config.paths import PROJECT_ROOT, RAW_DATA_PATH
 from src.evaluation.walk_forward_models import HUBER_DELTA, LSTM_MAX_EPOCHS
+from src.models.cnn_lstm import CNNLSTMForecaster
+from src.models.gru import GRUForecaster
 from src.models.lstm import LSTMForecaster
 from src.models.sklearn_models import RandomForestForecaster
 from src.serving.bundle import ModelBundle, feature_schema_version, save_bundle
@@ -37,8 +38,8 @@ from src.training.final_window import build_final_window
 
 HORIZON = 6
 SEED = 42  # DECISIONS.md "Phase 6: deep-model final deployment decision, 2026-09-25"
-ALLOWED_FAMILIES = {"random_forest", "lstm"}
-SEQUENCE_FAMILIES = {"lstm"}
+ALLOWED_FAMILIES = {"random_forest", "lstm", "gru", "cnn_lstm"}
+SEQUENCE_FAMILIES = {"lstm", "gru", "cnn_lstm"}
 SCALER_CONVENTION = (
     "StandardScaler fit on the untrimmed final-window feature frame "
     "(date < 2016-04-30), all rows True"
@@ -58,6 +59,10 @@ _FORECASTER_FACTORIES = {
     # max_epochs/huber_delta (LSTM_MAX_EPOCHS/HUBER_DELTA, imported above)
     # and seed (a fresh, distinct 42 for this final run) are provided.
     "lstm": lambda: LSTMForecaster(max_epochs=LSTM_MAX_EPOCHS, huber_delta=HUBER_DELTA, seed=SEED),
+    "gru": lambda: GRUForecaster(max_epochs=LSTM_MAX_EPOCHS, huber_delta=HUBER_DELTA, seed=SEED),
+    "cnn_lstm": lambda: CNNLSTMForecaster(
+        max_epochs=LSTM_MAX_EPOCHS, huber_delta=HUBER_DELTA, seed=SEED
+    ),
 }
 
 
