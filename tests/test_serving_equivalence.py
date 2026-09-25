@@ -105,8 +105,9 @@ def test_feature_and_prediction_equivalence():
         serving_raw_rows.append(raw_row[FEATURE_COLUMNS].to_numpy(dtype=float))
 
         service = ServingService(champion, buffer)
-        result = service.predict(current["date"], current["Appliances"])
-        serving_predictions.append(result.prediction_wh)
+        service.ingest(current["date"], current["Appliances"])
+        result = service.predict(["linear_regression"])[0]
+        serving_predictions.append(result["prediction_wh"])
 
     serving_raw_rows = np.array(serving_raw_rows)
     serving_predictions = np.array(serving_predictions)

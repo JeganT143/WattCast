@@ -1,14 +1,18 @@
-"""The serving core: one atomic append-and-predict operation over a
-RollingBuffer and a ModelBundle (DECISIONS.md "Phase 6: serving
-registration, 2026-09-25", section 3).
+"""The serving core, split into a state-mutating ingest and a read-only
+predict (Phase 6 follow-on: /ingest + /predict contract split).
 
-Any failure during predict() leaves the buffer unchanged — commit only
-happens after a finite prediction has been produced, so the same
-timestamp can always be retried.
+ingest() is the only operation that ever advances the RollingBuffer:
+validate the successor/duplicate timestamp rule and the finite-value
+rule, then commit — no prediction happens here. predict() never mutates
+the buffer: it builds the feature row once from the currently committed
+state and runs it through each requested model_family's forecaster, so
+multiple families see identical input and repeated calls without an
+intervening ingest are bit-identical. An unregistered model_family
+never raises or fails the whole request — it appears in the results
+list as {"model_family": ..., "error": "not_available"}.
 """
 
 import threading
-from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
@@ -22,48 +26,54 @@ from src.serving.features import serving_feature_row
 STEP = pd.Timedelta(minutes=10)
 
 
-@dataclass(frozen=True)
-class PredictionResult:
-    origin_timestamp: pd.Timestamp
-    forecast_timestamp: pd.Timestamp
-    prediction_wh: float
-
-
 class ServingService:
     def __init__(self, bundle: ModelBundle, buffer: RollingBuffer):
         self.bundle = bundle
         self.buffer = buffer
+        self._bundles = {bundle.schema["model_family"]: bundle}
         self._lock = threading.Lock()
 
-    def predict(self, ts: pd.Timestamp, appliances: float) -> PredictionResult:
+    def ingest(self, ts: pd.Timestamp, appliances: float) -> None:
         with self._lock:
             self.buffer.check_next(ts)
+            if not np.isfinite(appliances):
+                raise ValueError("appliances value must be finite")
+            self.buffer.commit(ts, appliances)
 
+    def predict(self, model_families: list[str]) -> list[dict]:
+        with self._lock:
             if not self.buffer.is_ready:
                 raise InsufficientHistoryError(
                     have=len(self.buffer), need=self.buffer.capacity
                 )
 
-            if not np.isfinite(appliances):
-                raise ValueError("appliances value must be finite")
-
-            frame = self.buffer.tentative_frame(ts, appliances)
+            frame = self.buffer.committed_frame()
             raw_row = serving_feature_row(frame)
-
             row_df = pd.DataFrame([raw_row])
-            scaled_df = transform_with_scaler(row_df, self.bundle.scaler, SCALED_COLUMNS)
-            X = scaled_df[self.bundle.forecaster.required_columns].to_numpy()
+            origin_timestamp = self.buffer.last_timestamp
 
-            pred = self.bundle.forecaster.predict(X)
-            if pred.shape != (1,) or not np.isfinite(pred).all():
-                raise ValueError("forecaster returned an invalid prediction")
+            results = []
+            for family in model_families:
+                bundle = self._bundles.get(family)
+                if bundle is None:
+                    results.append({"model_family": family, "error": "not_available"})
+                    continue
 
-            self.buffer.commit(ts, appliances)
+                scaled_df = transform_with_scaler(row_df, bundle.scaler, SCALED_COLUMNS)
+                X = scaled_df[bundle.forecaster.required_columns].to_numpy()
 
-            horizon = self.bundle.schema["horizon"]
-            forecast_timestamp = ts + horizon * STEP
-            return PredictionResult(
-                origin_timestamp=ts,
-                forecast_timestamp=forecast_timestamp,
-                prediction_wh=float(pred[0]),
-            )
+                pred = bundle.forecaster.predict(X)
+                if pred.shape != (1,) or not np.isfinite(pred).all():
+                    raise ValueError("forecaster returned an invalid prediction")
+
+                horizon = bundle.schema["horizon"]
+                results.append(
+                    {
+                        "model_family": family,
+                        "origin_timestamp": origin_timestamp,
+                        "forecast_timestamp": origin_timestamp + horizon * STEP,
+                        "prediction_wh": float(pred[0]),
+                        "model_version": bundle.schema.get("model_version"),
+                    }
+                )
+            return results

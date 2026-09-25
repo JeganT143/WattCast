@@ -34,9 +34,13 @@ from src.serving.registry import CHAMPION_ALIAS, REGISTERED_MODEL_NAME, load_cha
 from src.serving.service import ServingService
 
 
-class PredictRequest(BaseModel):
+class IngestRequest(BaseModel):
     timestamp: datetime
     appliances: float
+
+
+class PredictRequest(BaseModel):
+    model_families: list[str]
 
 
 def _default_load() -> ServingService:
@@ -62,8 +66,8 @@ def create_app(load: Callable[[], ServingService] = _default_load) -> FastAPI:
 
     app = FastAPI(lifespan=lifespan)
 
-    @app.post("/predict")
-    async def predict(payload: PredictRequest, request: Request) -> Any:
+    @app.post("/ingest")
+    async def ingest(payload: IngestRequest, request: Request) -> Any:
         service: ServingService = request.app.state.service
 
         timestamp = payload.timestamp
@@ -79,7 +83,7 @@ def create_app(load: Callable[[], ServingService] = _default_load) -> FastAPI:
             )
 
         try:
-            result = service.predict(pd.Timestamp(timestamp), payload.appliances)
+            service.ingest(pd.Timestamp(timestamp), payload.appliances)
         except DuplicateTimestampError as e:
             return JSONResponse(
                 status_code=409,
@@ -90,21 +94,50 @@ def create_app(load: Callable[[], ServingService] = _default_load) -> FastAPI:
                 status_code=409,
                 content={"status": "non_successor", "expected_next": str(e.expected_next)},
             )
+
+        return {
+            "origin_timestamp": timestamp.isoformat(),
+            "buffer_ready": service.buffer.is_ready,
+            "have": len(service.buffer),
+            "need": service.buffer.capacity,
+        }
+
+    @app.post("/predict")
+    async def predict(payload: PredictRequest, request: Request) -> Any:
+        service: ServingService = request.app.state.service
+
+        if len(payload.model_families) == 0:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "status": "invalid_model_families",
+                    "detail": "model_families must be non-empty",
+                },
+            )
+
+        try:
+            results = service.predict(payload.model_families)
         except InsufficientHistoryError as e:
             return JSONResponse(
                 status_code=503,
                 content={"status": "insufficient_history", "have": e.have, "need": e.need},
             )
 
-        schema = service.bundle.schema
-        return {
-            "origin_timestamp": result.origin_timestamp.isoformat(),
-            "forecast_timestamp": result.forecast_timestamp.isoformat(),
-            "prediction_wh": result.prediction_wh,
-            "horizon_steps": schema["horizon"],
-            "model_family": schema["model_family"],
-            "model_version": schema["model_version"],
-        }
+        formatted = []
+        for r in results:
+            if "error" in r:
+                formatted.append({"model_family": r["model_family"], "error": r["error"]})
+                continue
+            formatted.append(
+                {
+                    "model_family": r["model_family"],
+                    "origin_timestamp": r["origin_timestamp"].isoformat(),
+                    "forecast_timestamp": r["forecast_timestamp"].isoformat(),
+                    "prediction_wh": r["prediction_wh"],
+                    "model_version": r["model_version"],
+                }
+            )
+        return {"results": formatted}
 
     @app.get("/health")
     async def health(request: Request) -> Any:
@@ -118,6 +151,9 @@ def create_app(load: Callable[[], ServingService] = _default_load) -> FastAPI:
             "buffer_end": last.isoformat() if last is not None else None,
             "ready": service.buffer.is_ready,
             "required_raw_history": service.buffer.capacity,
+            "buffer_ready": service.buffer.is_ready,
+            "have": len(service.buffer),
+            "need": service.buffer.capacity,
         }
 
     @app.get("/model")

@@ -57,7 +57,7 @@ def _fake_bundle(horizon: int = 6, forecaster=None) -> ModelBundle:
         rng.uniform(0, 500, size=(50, len(SCALED_COLUMNS))), columns=SCALED_COLUMNS
     )
     scaler = StandardScaler().fit(fit_frame)
-    schema = {"horizon": horizon}
+    schema = {"horizon": horizon, "model_family": "linear_regression", "model_version": 1}
     return ModelBundle(forecaster=forecaster, scaler=scaler, schema=schema)
 
 
@@ -130,7 +130,7 @@ def test_short_buffer_insufficient_history(df_raw):
     assert not buffer.is_ready
     service = ServingService(_fake_bundle(), buffer)
     with pytest.raises(InsufficientHistoryError):
-        service.predict(short_tail["date"].iloc[-1] + pd.Timedelta(minutes=10), 60.0)
+        service.predict(["linear_regression"])
 
 
 def test_serving_feature_row_columns(df_raw):
@@ -147,10 +147,11 @@ def test_predict_forecast_timestamp_is_origin_plus_60min(df_raw):
     buffer = seed_buffer(df_raw, capacity, SEED_END)
     service = ServingService(_fake_bundle(horizon=6), buffer)
 
-    result = service.predict(FIRST_LIVE_TS, 60.0)
+    service.ingest(FIRST_LIVE_TS, 60.0)
+    results = service.predict(["linear_regression"])
 
-    assert result.origin_timestamp == FIRST_LIVE_TS
-    assert result.forecast_timestamp == FIRST_LIVE_TS + pd.Timedelta(minutes=60)
+    assert results[0]["origin_timestamp"] == FIRST_LIVE_TS
+    assert results[0]["forecast_timestamp"] == FIRST_LIVE_TS + pd.Timedelta(minutes=60)
 
 
 def test_failed_predict_leaves_buffer_unchanged_and_is_retryable(df_raw):
@@ -159,29 +160,34 @@ def test_failed_predict_leaves_buffer_unchanged_and_is_retryable(df_raw):
     forecaster = _StubForecaster(raise_on_predict=True)
     service = ServingService(_fake_bundle(forecaster=forecaster), buffer)
 
-    with pytest.raises(RuntimeError):
-        service.predict(FIRST_LIVE_TS, 60.0)
+    service.ingest(FIRST_LIVE_TS, 60.0)
+    have_before = len(buffer)
+    last_before = buffer.last_timestamp
 
-    assert buffer.last_timestamp == SEED_END
-    assert len(buffer) == capacity
+    with pytest.raises(RuntimeError):
+        service.predict(["linear_regression"])
+
+    assert buffer.last_timestamp == last_before
+    assert len(buffer) == have_before
 
     forecaster.raise_on_predict = False
-    result = service.predict(FIRST_LIVE_TS, 60.0)
-    assert result.origin_timestamp == FIRST_LIVE_TS
+    results = service.predict(["linear_regression"])
+    assert results[0]["origin_timestamp"] == FIRST_LIVE_TS
     assert buffer.last_timestamp == FIRST_LIVE_TS
 
 
-def test_concurrent_same_timestamp_yields_one_success(df_raw):
+def test_concurrent_same_timestamp_ingest_yields_one_success(df_raw):
     capacity = required_raw_history()
     buffer = seed_buffer(df_raw, capacity, SEED_END)
     service = ServingService(_fake_bundle(), buffer)
 
-    results = []
+    successes = []
     errors = []
 
     def worker():
         try:
-            results.append(service.predict(FIRST_LIVE_TS, 60.0))
+            service.ingest(FIRST_LIVE_TS, 60.0)
+            successes.append(True)
         except (DuplicateTimestampError, NonSuccessorTimestampError) as e:
             errors.append(e)
 
@@ -191,5 +197,50 @@ def test_concurrent_same_timestamp_yields_one_success(df_raw):
     for t in threads:
         t.join()
 
-    assert len(results) == 1
+    assert len(successes) == 1
     assert len(errors) == 1
+
+
+def test_predict_called_twice_without_ingest_is_bit_identical(df_raw):
+    capacity = required_raw_history()
+    buffer = seed_buffer(df_raw, capacity, SEED_END)
+    service = ServingService(_fake_bundle(horizon=6), buffer)
+
+    service.ingest(FIRST_LIVE_TS, 60.0)
+    first = service.predict(["linear_regression"])
+    second = service.predict(["linear_regression"])
+
+    assert first == second
+
+
+def test_predict_does_not_mutate_buffer_state(df_raw):
+    capacity = required_raw_history()
+    buffer = seed_buffer(df_raw, capacity, SEED_END)
+    service = ServingService(_fake_bundle(horizon=6), buffer)
+
+    service.ingest(FIRST_LIVE_TS, 60.0)
+    ready_before = buffer.is_ready
+    last_before = buffer.last_timestamp
+    len_before = len(buffer)
+
+    service.predict(["linear_regression"])
+    service.predict(["linear_regression"])
+
+    assert buffer.is_ready == ready_before
+    assert buffer.last_timestamp == last_before
+    assert len(buffer) == len_before
+
+
+def test_predict_reflects_state_advanced_by_ingest(df_raw):
+    capacity = required_raw_history()
+    buffer = seed_buffer(df_raw, capacity, SEED_END)
+    service = ServingService(_fake_bundle(horizon=6), buffer)
+
+    service.ingest(FIRST_LIVE_TS, 60.0)
+    first = service.predict(["linear_regression"])
+
+    service.ingest(FIRST_LIVE_TS + pd.Timedelta(minutes=10), 70.0)
+    second = service.predict(["linear_regression"])
+
+    assert first[0]["forecast_timestamp"] != second[0]["forecast_timestamp"]
+    assert second[0]["origin_timestamp"] == FIRST_LIVE_TS + pd.Timedelta(minutes=10)

@@ -80,6 +80,14 @@ class RollingBuffer:
         values = [row[1] for row in history] + [value]
         return pd.DataFrame({"date": dates, "Appliances": values})
 
+    def committed_frame(self) -> pd.DataFrame:
+        """The currently committed rows only, no tentative new row appended.
+        Read-only: unlike tentative_frame, this never represents a row that
+        has not yet been committed."""
+        dates = [row[0] for row in self._rows]
+        values = [row[1] for row in self._rows]
+        return pd.DataFrame({"date": dates, "Appliances": values})
+
     def commit(self, ts: pd.Timestamp, value: float) -> None:
         self._rows.append((ts, value))
         if len(self._rows) > self.capacity:
